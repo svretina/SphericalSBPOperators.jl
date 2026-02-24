@@ -1,19 +1,13 @@
-using DrWatson
-@quickactivate "SphericalSBPOperators.jl"
+using SphericalSBPOperators
+using SummationByPartsOperators: MattssonNordström2004
 
-# Here you may include files from the source directory
-include(srcdir("dummy_src_file.jl"))
+source = MattssonNordström2004()
+ops = spherical_operators(source;
+                          accuracy_order = 6,
+                          N = 32,
+                          R = 1.0,
+                          p = 2)
+report = validate(ops; verbose = true)
 
-println(
-"""
-Currently active project is: $(projectname())
-
-Path of active project: $(projectdir())
-
-Have fun with your new project!
-
-You can help us improve DrWatson by opening
-issues on GitHub, submitting feature requests,
-or even opening your own Pull Requests!
-"""
-)
+println("\nConstructed folded spherical operators with Nh = $(ops.Nh).")
+println("SBP residual (excluding origin row): $(report.sbp.sbp_no_origin)")

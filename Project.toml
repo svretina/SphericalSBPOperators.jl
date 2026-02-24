@@ -1,6 +1,36 @@
-name = "SphericalSBPOperators.jl"
-[compat]
-julia = "1.11.8"
-DrWatson = "2.19.1"
+name = "SphericalSBPOperators"
+uuid = "54f2a669-6442-4ec9-9f33-60161b4634ca"
+version = "0.1.0"
+
 [deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
+LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
+MakiePublication = "dde8697e-0d61-460d-88dd-856f66710dd1"
+OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
+OrdinaryDiffEqSDIRK = "2d112036-d095-4a1e-ab9a-08536f3ecdbf"
+OrdinaryDiffEqTsit5 = "b1df2697-797e-41e3-8120-5422d3b24e4a"
+SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+SummationByPartsOperators = "9f78cca6-572e-554e-b819-917d2f1cf240"
+
+[compat]
+CairoMakie = "0.15.8"
+DrWatson = "2.19.1"
+LaTeXStrings = "1.4.0"
+LinearSolve = "3"
+MakiePublication = "0.4.3"
+OrdinaryDiffEqLowOrderRK = "1"
+OrdinaryDiffEqSDIRK = "1"
+OrdinaryDiffEqTsit5 = "1.9.0"
+SciMLBase = "2"
+SummationByPartsOperators = "0.5"
+julia = "1.11"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
