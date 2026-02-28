@@ -1,0 +1,306 @@
+\documentclass[
+  aps,
+  pre,
+  reprint,
+  superscriptaddress,
+  nofootinbib
+]{revtex4-2}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsfonts,bm,mathtools}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\Divp}{\operatorname{Div}_{p}}
+
+\begin{document}
+
+\title{SBP-Compatible Spherical-Symmetry Operators by Folding a Mirrored Cartesian Grid}
+
+\author{SphericalSBPOperators Development Team}
+\affiliation{Computational Science and Engineering}
+
+\date{\today}
+
+\begin{abstract}
+We present a discrete construction of spherical-symmetry differential operators on
+$[0,R]$ based on folding a Cartesian summation-by-parts (SBP) operator built on the
+mirrored interval $[-R,R]$. The method enforces parity at the origin by construction,
+uses a metric-weighted mass matrix, and derives the divergence operator from the SBP
+identity with an outer-boundary-only boundary operator. The origin row of the
+divergence is not fixed by SBP when $p>0$ because the metric weight vanishes at
+$r=0$; we close this degree of freedom with the removable-singularity condition
+$(Du)(0)=(p+1)u'(0)$ computed from the odd-folded derivative. We provide a complete
+algorithm, variable definitions, diagnostic tests, and closure-aware validation
+metrics. Numerical diagnostics demonstrate that the observed polynomial test errors
+are boundary-closure dominated while safe-interior errors are near machine precision.
+\end{abstract}
+
+\maketitle
+
+\section{Problem setting and goals}
+We target radially symmetric operators on $r\in[0,R]$ for
+\begin{equation}
+\Divp(u) = \frac{1}{r^p}\frac{d}{dr}\left(r^p u\right),
+\quad p\in\{0,1,2\},
+\end{equation}
+with $p=2$ for 3D spherical symmetry, $p=1$ for cylindrical symmetry, and $p=0$ for
+Cartesian symmetry.
+
+The design requirements are:
+\begin{enumerate}
+  \item one half-grid vector size for all field types (no parity-specific DOF removal);
+  \item parity enforcement through extension maps from $[0,R]$ to $[-R,R]$;
+  \item metric-consistent SBP relation
+  \begin{equation}
+    H D + G^{T} H = B;
+  \end{equation}
+  \item regular origin treatment consistent with the continuum limit.
+\end{enumerate}
+
+\section{Parity and regularity at the origin}
+At $r=0$, parity is a symmetry condition, not a boundary condition:
+\begin{align}
+\phi(-r) &= \phi(r) \quad \text{(even scalar-like field)},\\
+u(-r) &= -u(r) \quad \text{(odd radial flux-like field)}.
+\end{align}
+Hence $u(0)=0$ for odd fields.
+
+For an odd regular flux
+$u(r)=a_1 r + a_3 r^3 + \cdots$, the divergence has a removable singularity:
+\begin{equation}
+\lim_{r\to 0}\Divp(u) = (p+1)a_1=(p+1)u'(0).
+\end{equation}
+The discrete scheme imposes this condition exactly in the first row of $D$.
+
+\section{Full-grid SBP ingredients}
+Let the full mirrored grid be
+\begin{equation}
+\bm{x}^{\mathrm{full}} = (x_1,\ldots,x_M), \qquad x_1=-R,\quad x_M=R,\quad M=2N+1.
+\end{equation}
+From \texttt{SummationByPartsOperators.jl}, we construct:
+\begin{itemize}
+  \item first-derivative matrix/operator $G^{\mathrm{full}}$ on $[-R,R]$,
+  \item diagonal-norm mass matrix $H^{\mathrm{full}}$.
+\end{itemize}
+Matrix extraction supports:
+\begin{enumerate}
+  \item direct matrix path when \texttt{Matrix(Dfull)} is square and consistent,
+  \item probing path: column $j$ is $D^{\mathrm{full}}e_j$.
+\end{enumerate}
+
+\section{Folding maps and half-grid operators}
+Define half-grid indices as nonnegative full-grid nodes:
+\begin{equation}
+\mathcal{I}_{+} = \{j \,|\, x_j\ge 0\},\qquad
+\bm{r}=(r_1,\ldots,r_{N_h}),\qquad r_1=0,\; r_{N_h}=R.
+\end{equation}
+
+We define sparse maps:
+\begin{align}
+R &\in \R^{N_h\times M} &&\text{(restriction full $\to$ half)},\\
+E_{\mathrm{even}} &\in \R^{M\times N_h} &&\text{(even extension half $\to$ full)},\\
+E_{\mathrm{odd}} &\in \R^{M\times N_h} &&\text{(odd extension half $\to$ full)}.
+\end{align}
+
+For each full node $x_j$, let $\sigma(j)$ be the paired half-node index satisfying
+$r_{\sigma(j)}=|x_j|$.
+Then
+\begin{align}
+\left(E_{\mathrm{even}}\right)_{j,\sigma(j)} &= 1,\\
+\left(E_{\mathrm{odd}}\right)_{j,\sigma(j)} &= \operatorname{sign}(x_j),
+\end{align}
+with $\operatorname{sign}(0)=0$ so that odd extensions vanish at the origin.
+
+Folded derivatives on $[0,R]$ are
+\begin{align}
+G_{\mathrm{even}} &= R\,G^{\mathrm{full}}\,E_{\mathrm{even}},\\
+G_{\mathrm{odd}}  &= R\,G^{\mathrm{full}}\,E_{\mathrm{odd}}.
+\end{align}
+$G_{\mathrm{even}}$ applies to even data and returns odd derivatives;
+$G_{\mathrm{odd}}$ applies to odd data and is used for $u'(0)$ in the origin closure.
+
+\section{Mass matrix, boundary operator, and divergence construction}
+For even integrands on the mirrored domain,
+\begin{equation}
+\int_{-R}^{R} f(x)\,dx = 2\int_{0}^{R}f(r)\,dr,
+\end{equation}
+which yields the half-grid Cartesian mass
+\begin{equation}
+H_{\mathrm{cart,half}} = \frac{1}{2}E_{\mathrm{even}}^{T}H^{\mathrm{full}}E_{\mathrm{even}}.
+\end{equation}
+
+The metric-weighted mass is
+\begin{equation}
+H = H_{\mathrm{cart,half}}\diag\!\left(r_1^p,\ldots,r_{N_h}^p\right).
+\end{equation}
+
+Only the outer boundary contributes:
+\begin{equation}
+B=\diag(0,\ldots,0,R^p).
+\end{equation}
+
+The divergence operator is defined by
+\begin{equation}
+H D = B - G_{\mathrm{even}}^{T}H.
+\end{equation}
+For diagonal-norm $H$, rows $i\ge 2$ are obtained by diagonal scaling:
+\begin{equation}
+D_{ij} = \frac{\left(B-G_{\mathrm{even}}^{T}H\right)_{ij}}{H_{ii}},\qquad i\ge 2.
+\end{equation}
+
+At $r=0$ and $p>0$, $H_{11}=0$, so SBP does not constrain row 1. We impose
+\begin{equation}
+D_{1,:}=(p+1)\,G_{\mathrm{odd},1,:},
+\end{equation}
+which enforces $(Du)(0)=(p+1)u'(0)$ for odd $u$.
+
+\section{Variable and symbol definitions}
+\begin{table*}[t]
+\centering
+\caption{Symbols used in the folding-SBP construction.}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Symbol & Type / size & Meaning \\
+\midrule
+$R$ & scalar & outer radius of half-domain $[0,R]$ \\
+$p$ & integer & metric power in $\Divp$ ($0,1,2$ typical) \\
+$N$ & integer & half-grid resolution parameter ($N_h=N+1$ for uniform mirrored grid) \\
+$M$ & integer & full-grid size, $M=2N+1$ \\
+$N_h$ & integer & half-grid size (number of nonnegative nodes) \\
+$\bm{x}^{\mathrm{full}}$ & $\R^M$ & full mirrored grid coordinates on $[-R,R]$ \\
+$\bm{r}$ & $\R^{N_h}$ & half-grid coordinates on $[0,R]$ \\
+$G^{\mathrm{full}}$ & $\R^{M\times M}$ & full-grid Cartesian SBP first-derivative matrix \\
+$H^{\mathrm{full}}$ & $\R^{M\times M}$ diagonal & full-grid Cartesian SBP mass matrix \\
+$R$ (matrix) & $\R^{N_h\times M}$ & restriction matrix (full $\to$ half) \\
+$E_{\mathrm{even}}$ & $\R^{M\times N_h}$ & even extension matrix (half $\to$ full) \\
+$E_{\mathrm{odd}}$ & $\R^{M\times N_h}$ & odd extension matrix (half $\to$ full) \\
+$G_{\mathrm{even}}$ & $\R^{N_h\times N_h}$ & folded gradient for even inputs \\
+$G_{\mathrm{odd}}$ & $\R^{N_h\times N_h}$ & folded derivative for odd inputs \\
+$H_{\mathrm{cart,half}}$ & $\R^{N_h\times N_h}$ diagonal & folded Cartesian half-mass \\
+$H$ & $\R^{N_h\times N_h}$ diagonal & metric-weighted half-mass \\
+$B$ & $\R^{N_h\times N_h}$ diagonal & boundary operator, only $B_{N_hN_h}=R^p$ nonzero \\
+$D$ & $\R^{N_h\times N_h}$ & folded divergence operator \\
+$\mathcal{I}_{\mathrm{safe}}$ & index set & safe interior rows after closure exclusion \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Closure-aware diagnostics and validation}
+\subsection{Why closure detection matters}
+For optimized SBP operators, boundary closure rows may have the same number of
+nonzeros as interior rows, so row-nonzero counts are insufficient to detect closures.
+We therefore detect closure rows by row pattern and optionally coefficients.
+
+\subsection{Pattern and coefficient closure detection}
+Let $G=G_{\mathrm{even}}$, $N_h=\text{size}(G,1)$, and choose reference row
+$i_0=\lfloor N_h/2\rfloor$.
+Define row pattern
+\begin{equation}
+\pi_i = \operatorname{sort}\{j-i \;|\; G_{ij}\ne 0\}.
+\end{equation}
+Right closure width is the number of trailing rows from $N_h$ backward with
+$\pi_i\ne \pi_{i_0}$. Left closure is analogous from row $1$ forward.
+
+Coefficient-sensitive refinement marks a row as closure when
+\begin{equation}
+\|G_{i,:}-G_{i_0,:}\|_{\infty} > \tau_{\mathrm{coeff}},
+\quad
+\tau_{\mathrm{coeff}}=
+10^3\epsilon_{\mathrm{mach}}\max\!\left(1,\|G_{i_0,:}\|_{\infty}\right).
+\end{equation}
+
+An additional right-closure hint from SBP metadata is
+\begin{equation}
+n_{\mathrm{rw}} = \texttt{length}(D^{\mathrm{full}}.\texttt{coefficients.right\_weights}).
+\end{equation}
+The effective right closure is chosen conservatively as
+\begin{equation}
+w_{\mathrm{right}} = \max(w_{\mathrm{right,pattern}}, n_{\mathrm{rw}}).
+\end{equation}
+
+\subsection{Safe interior and reported errors}
+Safe interior indices are
+\begin{equation}
+\mathcal{I}_{\mathrm{safe}}=
+\{1+w_{\mathrm{left}},\ldots,N_h-w_{\mathrm{right}}\}.
+\end{equation}
+For each tested polynomial moment, we report:
+\begin{itemize}
+  \item global maximum error,
+  \item safe-interior maximum error on $\mathcal{I}_{\mathrm{safe}}$,
+  \item near-boundary maximum error on the last $n_b$ nodes (default $n_b=8$).
+\end{itemize}
+
+\section{Representative numerical report}
+For a typical run
+(\texttt{accuracy\_order}=4, $N=64$, $R=1$, $p=2$), the implementation reports:
+\begin{itemize}
+  \item closure widths: $w_{\mathrm{left}}=2$, $w_{\mathrm{right}}=4$;
+  \item quartic gradient test ($\phi=r^4$):
+  \begin{align*}
+    \max|e| &= 2.4351\times10^{-3},\\
+    \max_{\mathcal{I}_{\mathrm{safe}}}|e| &= 3.55\times10^{-15},\\
+    \max_{\text{near boundary}}|e| &= 2.4351\times10^{-3};
+  \end{align*}
+  \item linear odd-divergence test ($u=r$, exact $\operatorname{Div}_2(u)=3$):
+  \begin{align*}
+    \max|e| &= 6.1753\times10^{-4},\\
+    \max_{\mathcal{I}_{\mathrm{safe}}}|e| &= 1.24\times10^{-14},\\
+    \max_{\text{near boundary}}|e| &= 6.1753\times10^{-4}.
+  \end{align*}
+\end{itemize}
+These data show that the dominant polynomial errors are closure-localized near
+$r=R$, while interior consistency is near machine precision.
+
+\section{Algorithm summary}
+\begin{enumerate}
+  \item Build full-grid SBP derivative and mass on $[-R,R]$.
+  \item Construct $R$, $E_{\mathrm{even}}$, $E_{\mathrm{odd}}$ from full-grid coordinates.
+  \item Fold derivatives: $G_{\mathrm{even}}=RG^{\mathrm{full}}E_{\mathrm{even}}$ and
+  $G_{\mathrm{odd}}=RG^{\mathrm{full}}E_{\mathrm{odd}}$.
+  \item Fold mass and apply metric: $H=H_{\mathrm{cart,half}}\diag(r^p)$.
+  \item Set $B=\diag(0,\ldots,0,R^p)$.
+  \item Compute $D$ from SBP for rows $i\ge 2$ and enforce
+  $D_{1,:}=(p+1)G_{\mathrm{odd},1,:}$.
+  \item Run diagnostics and closure-aware validation with safe interior reporting.
+\end{enumerate}
+
+\section{Conclusions}
+The mirrored-grid folding framework yields parity-consistent spherical operators that
+retain SBP structure with metric weighting and correct origin regularity. The key
+practical point is closure-aware interpretation: global polynomial errors can be
+dominated by a few outer closure rows even when interior behavior is near roundoff.
+Pattern-plus-coefficient closure detection and right-weight metadata from the SBP
+operator provide a robust basis for defining safe interior metrics.
+
+\begin{acknowledgments}
+This report documents the current implementation in
+\texttt{SphericalSBPOperators.jl} and its validation diagnostics.
+\end{acknowledgments}
+
+\begin{thebibliography}{99}
+
+\bibitem{Strand1994}
+B. Strand,
+Summation by parts for finite difference approximations for $d/dx$,
+\textit{J. Comput. Phys.} \textbf{110}, 47--67 (1994).
+
+\bibitem{MattssonNordstrom2004}
+K. Mattsson and J. Nordstrom,
+Summation by parts operators for finite difference approximations of second derivatives,
+\textit{J. Comput. Phys.} \textbf{199}, 503--540 (2004).
+
+\end{thebibliography}
+
+\end{document}
