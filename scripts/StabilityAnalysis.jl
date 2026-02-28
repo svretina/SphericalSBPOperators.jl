@@ -1,6 +1,7 @@
 using LinearAlgebra
 using SparseArrays
 using Printf
+using SummationByPartsOperators: derivative_operator, dissipation_operator, grid
 using SciMLBase: ODEProblem, solve
 using OrdinaryDiffEqLowOrderRK: RK4
 using CairoMakie
@@ -213,6 +214,316 @@ function spectral_analysis(D::AbstractMatrix,
             spectral_radius_mode_eigenvalue = spectral_radius_mode_eigenvalue,
             rk4_dt_max_imag_axis = dt_rk4_imag_axis,
             rk4_dt_max_full_spectrum = dt_rk4_from_full_spectrum
+           )
+end
+
+"""
+    test_pole_stability(D, G, H; B=nothing, boundary_condition=:reflecting,
+                        enforce_origin=true, tol=1e-10,
+                        spectrum_plot_path=nothing, make_plot=true)
+
+Definitive eigenvalue stability check for the first-order wave block system
+`u_t = L u`, `u = [Pi; Psi]`, using SAT boundary closure consistent with the
+wave-system Jacobian implementation in `wave_physics.jl`.
+
+Inputs:
+- `D`, `G`, `H`: `N x N` operators (any matrix-like type; converted to dense `Float64`).
+- `B` (optional): if provided, uses `B[end,end]` for SAT scaling.
+  If omitted and SAT is enabled, uses canonical `B[end,end]=1` (i.e. `E_N` form).
+- `boundary_condition`: `:absorbing`, `:reflecting`, `:dirichlet`, or `:none`
+  (aliases: `:radiative` -> `:absorbing`, `:reflective` -> `:reflecting`).
+- `enforce_origin`: if `true`, imposes odd-subspace invariance via `dPsi[1]=0`.
+- `tol`: growth tolerance for `max(real(eigvals(L)))`.
+
+Returns:
+- `(is_stable::Bool, max_real_part::Float64)`.
+"""
+function test_pole_stability(D,
+                             G,
+                             H;
+                             B = nothing,
+                             boundary_condition::Symbol = :reflecting,
+                             enforce_origin::Bool = true,
+                             tol::Float64 = 1e-10,
+                             spectrum_plot_path::Union{Nothing, AbstractString} = nothing,
+                             make_plot::Bool = true)
+    Df = Matrix{Float64}(D)
+    Gf = Matrix{Float64}(G)
+    Hf = Matrix{Float64}(H)
+
+    nD1, nD2 = size(Df)
+    nG1, nG2 = size(Gf)
+    nH1, nH2 = size(Hf)
+    nD1 == nD2 || throw(DimensionMismatch("`D` must be square."))
+    nG1 == nG2 || throw(DimensionMismatch("`G` must be square."))
+    nH1 == nH2 || throw(DimensionMismatch("`H` must be square."))
+    nD1 == nG1 == nH1 || throw(DimensionMismatch("`D`, `G`, and `H` must have identical sizes."))
+
+    n = nD1
+    bc_norm = _normalize_boundary_condition(boundary_condition)
+
+    Bf = if B === nothing
+        M = zeros(Float64, n, n)
+        if bc_norm !== :none
+            M[end, end] = 1.0
+        end
+        M
+    else
+        M = Matrix{Float64}(B)
+        size(M, 1) == n == size(M, 2) || throw(DimensionMismatch("`B` must be $n x $n."))
+        M
+    end
+
+    if bc_norm !== :none
+        abs(Hf[end, end]) > eps(Float64) ||
+            throw(ArgumentError("`H[end,end]` must be nonzero for SAT closure."))
+    end
+
+    L_closed = assemble_block_operator(
+                                    Df,
+                                    Gf;
+                                    H = Hf,
+                                    B = Bf,
+                                    boundary_condition = bc_norm,
+                                    enforce_origin = enforce_origin
+                                   )
+
+    eigvals_closed = eigvals(L_closed)
+    real_parts = real.(eigvals_closed)
+    max_real = isempty(real_parts) ? -Inf : maximum(real_parts)
+    unstable_count = count(>(tol), real_parts)
+    is_stable = max_real <= tol
+
+    @printf("Pole stability test (bc=%s, enforce_origin=%s)\n", String(bc_norm), string(enforce_origin))
+    @printf("  max Re(lambda) = %.12e (tol = %.3e)\n", max_real, tol)
+    @printf("  unstable eigenvalues (Re > tol): %d / %d\n", unstable_count, length(eigvals_closed))
+    println("  verdict: ", is_stable ? "stable (no growing modes above tolerance)" : "unstable (growing modes detected)")
+
+    if make_plot
+        path = isnothing(spectrum_plot_path) ?
+               joinpath("plots", "stability", "pole_closed_spectrum_" * String(bc_norm) * ".png") :
+               String(spectrum_plot_path)
+        mkpath(dirname(path))
+        save_spectrum_plot(eigvals_closed, path)
+        println("  spectrum plot: ", path)
+    end
+
+    return (is_stable, Float64(max_real))
+end
+
+function _build_even_folding_maps(xfull::AbstractVector{<:Real}; atol::Float64 = 1e-12)
+    xf = Float64.(xfull)
+    m = length(xf)
+    half_indices = sort([i for i in eachindex(xf) if xf[i] >= -atol]; by = i -> xf[i])
+    isempty(half_indices) && throw(ArgumentError("Could not identify nonnegative half-grid from full Cartesian grid."))
+
+    r = xf[half_indices]
+    abs(r[1]) <= atol || throw(ArgumentError("Folded half-grid does not start at the origin."))
+
+    n = length(r)
+    rowR = collect(1:n)
+    Rop = sparse(rowR, half_indices, ones(Float64, n), n, m)
+
+    scale = max(1.0, maximum(abs.(r)))
+    pair_tol = max(atol, 64.0 * eps(Float64) * scale)
+    key_to_index = Dict{Int, Int}()
+    for (j, rj) in enumerate(r)
+        key_to_index[round(Int, rj / pair_tol)] = j
+    end
+
+    row_even = Int[]
+    col_even = Int[]
+    val_even = Float64[]
+    for i in eachindex(xf)
+        absx = abs(xf[i])
+        key = round(Int, absx / pair_tol)
+
+        jmatch = 0
+        for dk in -2:2
+            j = get(key_to_index, key + dk, 0)
+            if j != 0 && abs(r[j] - absx) <= pair_tol
+                jmatch = j
+                break
+            end
+        end
+        jmatch != 0 ||
+            throw(ArgumentError("Could not pair mirrored grid point |x|=$absx to a half-grid node."))
+
+        push!(row_even, i)
+        push!(col_even, jmatch)
+        push!(val_even, 1.0)
+    end
+
+    Eeven = sparse(row_even, col_even, val_even, m, n)
+    return (Rop = Rop, Eeven = Eeven, r = r, half_indices = half_indices)
+end
+
+function _probe_linear_operator_matrix(op, n::Int)
+    M = zeros(Float64, n, n)
+    e = zeros(Float64, n)
+    @inbounds for j in 1:n
+        e[j] = 1.0
+        M[:, j] .= Float64.(op * e)
+        e[j] = 0.0
+    end
+    return M
+end
+
+function _as_dense_square_matrix(op, n::Int)
+    maybe_dense = try
+        Matrix(op)
+    catch
+        nothing
+    end
+    if maybe_dense !== nothing && size(maybe_dense) == (n, n)
+        return Matrix{Float64}(maybe_dense)
+    end
+    return _probe_linear_operator_matrix(op, n)
+end
+
+function build_folded_sbp_dissipation(ops; atol::Float64 = 1e-12)
+    n = size(getproperty(ops, :H), 1)
+    n >= 2 || throw(ArgumentError("Need at least two half-grid nodes to build dissipation."))
+
+    m_full = hasproperty(ops, :M_full) ? Int(getproperty(ops, :M_full)) : (2 * (n - 1) + 1)
+    m_full > 0 || throw(ArgumentError("Invalid full-grid size inferred for base dissipation operator."))
+
+    base_D = derivative_operator(
+                                 getproperty(ops, :source);
+                                 derivative_order = 1,
+                                 accuracy_order = Int(getproperty(ops, :accuracy_order)),
+                                 xmin = -Float64(getproperty(ops, :R)),
+                                 xmax = Float64(getproperty(ops, :R)),
+                                 N = m_full,
+                                 mode = getproperty(ops, :mode)
+                                )
+
+    xfull = collect(grid(base_D))
+    fold = _build_even_folding_maps(xfull; atol = atol)
+
+    Di = dissipation_operator(base_D)
+    Di_full = _as_dense_square_matrix(Di, length(xfull))
+    Di_folded = Matrix{Float64}(fold.Rop * Di_full * fold.Eeven)
+
+    size(Di_folded, 1) == n == size(Di_folded, 2) ||
+        throw(DimensionMismatch("Folded dissipation size $(size(Di_folded)) does not match half-grid size $n."))
+
+    return (
+            Di_folded = Di_folded,
+            Di_full = Di_full,
+            base_D = base_D,
+            xfull = Float64.(xfull),
+            r_folded = fold.r
+           )
+end
+
+"""
+    test_pole_stability_dissipative_overlay(ops; epsilon=0.05, boundary_condition=:absorbing,
+                                            enforce_origin=true, tol=1e-10,
+                                            overlay_plot_path=nothing, make_plot=true,
+                                            throw_on_violation=true)
+
+Build the SAT-closed wave block operator and its dissipative counterpart
+
+`L_diss = L_closed - diag(ϵ H_safe^{-1} D_diss, ϵ H_safe^{-1} D_diss)`
+
+where `D_diss` is a positive-semidefinite dissipation matrix on the folded grid.
+`SummationByPartsOperators.dissipation_operator(base_D)` returns a matrix with
+the opposite sign convention, so this routine defines
+`D_diss := -Di_pkg_folded` before applying the standard `-ϵ H^{-1} D_diss` form.
+
+`H_safe^{-1}[1,1]=0` handles the semi-norm pole degeneracy `H[1,1]=0`.
+"""
+function test_pole_stability_dissipative_overlay(ops;
+                                                 epsilon::Float64 = 0.05,
+                                                 boundary_condition::Symbol = :absorbing,
+                                                 enforce_origin::Bool = true,
+                                                 tol::Float64 = 1e-10,
+                                                 overlay_plot_path::Union{Nothing, AbstractString} = nothing,
+                                                 make_plot::Bool = true,
+                                                 throw_on_violation::Bool = true)
+    epsilon >= 0 || throw(ArgumentError("`epsilon` must be nonnegative."))
+
+    Df = Matrix{Float64}(getproperty(ops, :D))
+    Gf = Matrix{Float64}(getproperty(ops, :Geven))
+    Hf = Matrix{Float64}(getproperty(ops, :H))
+    Bf = Matrix{Float64}(getproperty(ops, :B))
+
+    n = size(Df, 1)
+    size(Gf, 1) == n == size(Gf, 2) || throw(DimensionMismatch("`ops.Geven` must be $n x $n."))
+    size(Hf, 1) == n == size(Hf, 2) || throw(DimensionMismatch("`ops.H` must be $n x $n."))
+    size(Bf, 1) == n == size(Bf, 2) || throw(DimensionMismatch("`ops.B` must be $n x $n."))
+
+    bc_norm = _normalize_boundary_condition(boundary_condition)
+    L_closed = assemble_block_operator(
+                                    Df,
+                                    Gf;
+                                    H = Hf,
+                                    B = Bf,
+                                    boundary_condition = bc_norm,
+                                    enforce_origin = enforce_origin
+                                   )
+
+    diss = build_folded_sbp_dissipation(ops)
+    Di_pkg_folded = diss.Di_folded
+    D_diss = -Di_pkg_folded
+
+    hdiag = diag(Hf)
+    Hinv_safe_diag = zeros(Float64, n)
+    Hinv_safe_diag[1] = 0.0
+    for j in 2:n
+        abs(hdiag[j]) > eps(Float64) ||
+            throw(ArgumentError("`H[$j,$j]` is zero; cannot form safe inverse mass for dissipation."))
+        Hinv_safe_diag[j] = 1.0 / hdiag[j]
+    end
+    H_inv_safe = Diagonal(Hinv_safe_diag)
+
+    Diss_block = -epsilon * Matrix(H_inv_safe * D_diss)
+    Z = zeros(Float64, n, n)
+    L_diss_penalty = [Diss_block Z; Z Diss_block]
+    L_dissipative = L_closed + L_diss_penalty
+
+    eig_closed = eigvals(L_closed)
+    eig_diss = eigvals(L_dissipative)
+    max_real_closed = isempty(eig_closed) ? -Inf : maximum(real.(eig_closed))
+    max_real_diss = isempty(eig_diss) ? -Inf : maximum(real.(eig_diss))
+    is_stable = max_real_diss <= tol
+    shifted_left = max_real_diss <= max_real_closed + tol
+
+    @printf("Dissipative pole-stability test (bc=%s, epsilon=%.4g, enforce_origin=%s)\n",
+            String(bc_norm), epsilon, string(enforce_origin))
+    @printf("  baseline max Re(lambda): %.12e\n", max_real_closed)
+    @printf("  dissipative max Re(lambda): %.12e (tol = %.3e)\n", max_real_diss, tol)
+    @printf("  left-shift check (diss <= baseline + tol): %s\n", shifted_left ? "pass" : "fail")
+    println("  verdict: ", is_stable ? "stable (no growing modes above tolerance)" : "unstable (growing modes detected)")
+
+    if throw_on_violation
+        is_stable || error("Dissipative operator unstable: max Re(lambda) = $max_real_diss > tol = $tol.")
+        shifted_left || error("Dissipative spectrum is not shifted left enough: baseline=$max_real_closed, diss=$max_real_diss, tol=$tol.")
+    end
+
+    if make_plot
+        path = isnothing(overlay_plot_path) ?
+               joinpath("plots", "stability", "pole_closed_spectrum_dissipative_overlay.png") :
+               String(overlay_plot_path)
+        mkpath(dirname(path))
+        save_spectrum_overlay_plot(eig_closed, eig_diss, path)
+        println("  overlay spectrum plot: ", path)
+    end
+
+    return (
+            is_stable = is_stable,
+            max_real_baseline = Float64(max_real_closed),
+            max_real_dissipative = Float64(max_real_diss),
+            epsilon = epsilon,
+            boundary_condition = bc_norm,
+            eigvals_baseline = eig_closed,
+            eigvals_dissipative = eig_diss,
+            L_closed = L_closed,
+            L_dissipative = L_dissipative,
+            Diss_block = Diss_block,
+            Di_folded = Di_pkg_folded,
+            D_diss = D_diss
            )
 end
 
@@ -511,6 +822,37 @@ function save_spectrum_plot(eigvals::AbstractVector{<:Complex}, path::AbstractSt
     return path
 end
 
+function save_spectrum_overlay_plot(eigvals_baseline::AbstractVector{<:Complex},
+                                    eigvals_dissipative::AbstractVector{<:Complex},
+                                    path::AbstractString)
+    fig = Figure(size = (860, 620))
+    ax = Axis(fig[1, 1],
+              xlabel = L"\mathrm{Re}(\lambda)",
+              ylabel = L"\mathrm{Im}(\lambda)",
+              title = L"\mathrm{Closed\ Spectrum:\ Baseline\ vs\ Dissipative}")
+
+    scatter!(ax,
+             real.(eigvals_baseline),
+             imag.(eigvals_baseline);
+             markersize = 5,
+             marker = :circle,
+             color = (:lightskyblue3, 0.45),
+             label = "Baseline")
+
+    scatter!(ax,
+             real.(eigvals_dissipative),
+             imag.(eigvals_dissipative);
+             markersize = 7,
+             marker = :utriangle,
+             color = (:darkorange3, 0.90),
+             label = "Dissipative")
+
+    vlines!(ax, [0.0]; linestyle = :dash, color = :black, linewidth = 2)
+    axislegend(ax; position = :rt)
+    save(path, fig)
+    return path
+end
+
 function save_nullspace_plot(null_report, path::AbstractString; max_modes::Int = 6)
     if isempty(null_report.entries)
         fig = Figure(size = (760, 240))
@@ -775,10 +1117,39 @@ if abspath(PROGRAM_FILE) == @__FILE__
                               mode = SafeMode()
                              )
 
+    pole_stability = test_pole_stability(
+                                         Matrix(ops.D),
+                                         Matrix(ops.Geven),
+                                         Matrix(ops.H);
+                                         B = Matrix(ops.B),
+                                         boundary_condition = :reflecting,
+                                         enforce_origin = true,
+                                         tol = 1e-10,
+                                         spectrum_plot_path = "plots/stability/pole_closed_spectrum_reflecting.png",
+                                         make_plot = true
+                                        )
+    @printf("Reflective closed-operator stability tuple: (is_stable=%s, max_real=%.12e)\n",
+            string(pole_stability[1]), pole_stability[2])
+
+    diss_overlay = test_pole_stability_dissipative_overlay(
+                                                            ops;
+                                                            epsilon = 0.05,
+                                                            boundary_condition = :absorbing,
+                                                            enforce_origin = true,
+                                                            tol = 1e-10,
+                                                            overlay_plot_path = "plots/stability/pole_closed_spectrum_dissipative_overlay.png",
+                                                            make_plot = true,
+                                                            throw_on_violation = true
+                                                           )
+    @printf("Absorbing dissipative stability: (is_stable=%s, baseline_max_real=%.12e, dissipative_max_real=%.12e)\n",
+            string(diss_overlay.is_stable),
+            diss_overlay.max_real_baseline,
+            diss_overlay.max_real_dissipative)
+
     report = run_stability_suite(
                                  ;
                                  ops = ops,
-                                 boundary_condition = :absorbing,
+                                 boundary_condition = :reflecting,
                                  growth_tol = 1e-12,
                                  null_tol = 1e-11,
                                  throw_on_instability = false,
