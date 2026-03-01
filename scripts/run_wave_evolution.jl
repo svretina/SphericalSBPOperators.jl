@@ -1,7 +1,8 @@
-using SphericalSBPOperators
+import SphericalSBPOperators: solve_wave_ode, spherical_operators, validate
+import SummationByPartsOperators: MattssonNordström2004
+
 using OrdinaryDiffEqLowOrderRK: RK4
 using OrdinaryDiffEqSDIRK: ImplicitMidpoint
-using SummationByPartsOperators: MattssonNordström2004
 
 """
     run_wave_evolution(; kwargs...)
@@ -36,61 +37,74 @@ Returns a named tuple:
 - `sol`: wave evolution result (`sol.t`, `sol.pi`, `sol.xi`, `sol.energy`).
 """
 function run_wave_evolution(;
-                            accuracy_order::Int = 6,
-                            N::Int = 64,
-                            R::Real = 1.0,
-                            p::Int = 2,
-                            T_final::Real = 0.2,
-                            dt = nothing,
-                            alg = nothing,
-                            safety_factor::Real = 0.9,
-                            boundary_condition::Symbol = :absorbing,
-                            ϕ0 = nothing,
-                            Π0 = nothing,
-                            Ξ0 = nothing,
-                            phi0 = nothing,
-                            pi0 = nothing,
-                            xi0 = nothing,
-                            save_every::Int = 1,
-                            build_matrix::Symbol = :matrix_if_square,
-                            noise_amplitude::Real = 0.0,
-                            noise_seed = nothing,
-                            verbose::Bool = true)
-    # 1) Choose the underlying Cartesian SBP family on the mirrored grid [-R, R].
+        accuracy_order::Int = 6,
+        N::Int = 64,
+        R::Real = 1.0,
+        p::Int = 2,
+        T_final::Real = 0.2,
+        dt = nothing,
+        alg = nothing,
+        safety_factor::Real = 0.9,
+        boundary_condition::Symbol = :absorbing,
+        phi0 = nothing,
+        pi0 = nothing,
+        xi0 = nothing,
+        save_every::Int = 1,
+        build_matrix::Symbol = :matrix_if_square,
+        noise_amplitude::Real = 0.0,
+        noise_seed = nothing,
+        verbose::Bool = true,
+        kwargs...
+    )
+    phi0_unicode = get(kwargs, :ϕ0, nothing)
+    pi0_unicode = get(kwargs, :Π0, nothing)
+    xi0_unicode = get(kwargs, :Ξ0, nothing)
+
+    if !isnothing(phi0) && !isnothing(phi0_unicode)
+        throw(ArgumentError("Use either `phi0` or `ϕ0`, not both."))
+    end
+    if !isnothing(pi0) && !isnothing(pi0_unicode)
+        throw(ArgumentError("Use either `pi0` or `Π0`, not both."))
+    end
+    if !isnothing(xi0) && !isnothing(xi0_unicode)
+        throw(ArgumentError("Use either `xi0` or `Ξ0`, not both."))
+    end
+
+    phi0_value = isnothing(phi0) ? phi0_unicode : phi0
+    pi0_value = isnothing(pi0) ? pi0_unicode : pi0
+    xi0_value = isnothing(xi0) ? xi0_unicode : xi0
+
     source = MattssonNordström2004()
 
-    # 2) Construct folded spherical operators on [0, R].
-    ops = spherical_operators(source;
-                              accuracy_order = accuracy_order,
-                              N = N,
-                              R = R,
-                              p = p,
-                              build_matrix = build_matrix)
+    ops = spherical_operators(
+        source;
+        accuracy_order = accuracy_order,
+        N = N,
+        R = R,
+        p = p,
+        build_matrix = build_matrix
+    )
 
-    # 3) Optionally validate the operator set before time evolution.
     report = validate(ops; max_monomial_degree = accuracy_order, verbose = false)
 
-    # 4) Time integrator choice.
     bc_reflecting = boundary_condition === :reflecting || boundary_condition === :reflective
     alg_use = alg === nothing ? (bc_reflecting ? ImplicitMidpoint() : RK4()) : alg
 
-    # 5) Evolve the wave system.
-    sol = solve_wave_ode(ops;
-                         T_final = T_final,
-                         dt = dt,
-                         alg = alg_use,
-                         safety_factor = safety_factor,
-                         boundary_condition = boundary_condition,
-                         ϕ0 = ϕ0,
-                         Π0 = Π0,
-                         Ξ0 = Ξ0,
-                         phi0 = phi0,
-                         pi0 = pi0,
-                         xi0 = xi0,
-                         save_every = save_every,
-                         noise_amplitude = noise_amplitude,
-                         noise_seed = noise_seed,
-                         verbose = verbose)
+    sol = solve_wave_ode(
+        ops;
+        T_final = T_final,
+        dt = dt,
+        alg = alg_use,
+        safety_factor = safety_factor,
+        boundary_condition = boundary_condition,
+        phi0 = phi0_value,
+        pi0 = pi0_value,
+        xi0 = xi0_value,
+        save_every = save_every,
+        noise_amplitude = noise_amplitude,
+        noise_seed = noise_seed,
+        verbose = verbose
+    )
 
     if verbose
         println("\nWave run diagnostics")
@@ -102,7 +116,10 @@ function run_wave_evolution(;
         println("  initial origin_residual (Ξ[1]) = ", sol.initial_data_check.origin_residual)
         println("  initial boundary_residual = ", sol.initial_data_check.boundary_residual)
         println("  initial max|Π| interior = ", sol.initial_data_check.max_abs_pi_interior)
-        println("  initial Π[end] = ", sol.Π[end, 1], " (SAT BCs are imposed through RHS, not state projection)")
+        println(
+            "  initial Π[end] = ", sol.Π[end, 1],
+            " (SAT BCs are imposed through RHS, not state projection)"
+        )
         println("  initial_energy = ", sol.energy[1], ", final_energy = ", sol.energy[end])
     end
 

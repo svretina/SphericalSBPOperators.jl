@@ -2,7 +2,7 @@ function _row_structure(G::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integ
     n, m = size(G)
     cols_by_row = [Int[] for _ in 1:n]
     vals_by_row = [T[] for _ in 1:n]
-    @inbounds for j in 1:m
+    for j in 1:m
         for ptr in G.colptr[j]:(G.colptr[j + 1] - 1)
             i = G.rowval[ptr]
             push!(cols_by_row[i], j)
@@ -16,12 +16,14 @@ end
     return cols .- i
 end
 
-function _row_closure_flag(i::Int,
-                           patterns::Vector{Vector{Int}},
-                           values::AbstractVector{<:AbstractVector};
-                           reference_row::Int,
-                           coeff_sensitive::Bool,
-                           tol_coeff::Float64)
+function _row_closure_flag(
+        i::Int,
+        patterns::Vector{Vector{Int}},
+        values::AbstractVector{<:AbstractVector};
+        reference_row::Int,
+        coeff_sensitive::Bool,
+        tol_coeff::Float64
+    )
     pattern_i = patterns[i]
     pattern_ref = patterns[reference_row]
     if pattern_i != pattern_ref
@@ -37,7 +39,7 @@ function _row_closure_flag(i::Int,
     length(vals_i) == length(vals_ref) || return true
 
     maxdiff = 0.0
-    @inbounds for k in eachindex(vals_i)
+    for k in eachindex(vals_i)
         d = abs(Float64(vals_i[k]) - Float64(vals_ref[k]))
         if d > maxdiff
             maxdiff = d
@@ -46,24 +48,26 @@ function _row_closure_flag(i::Int,
     return maxdiff > tol_coeff
 end
 
-function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
-                              coeff_sensitive::Bool = true,
-                              tol_coeff::Union{Nothing, Float64} = nothing) where {T <: Real, Ti <: Integer}
+function _closure_diagnostics(
+        G::SparseMatrixCSC{T, Ti};
+        coeff_sensitive::Bool = true,
+        tol_coeff::Union{Nothing, Float64} = nothing
+    ) where {T <: Real, Ti <: Integer}
     n = size(G, 1)
     if n == 0
         return (
-                row_nnz = Int[],
-                interior_mode = 0,
-                reference_row = 1,
-                reference_pattern = Int[],
-                coeff_sensitive = coeff_sensitive,
-                tol_coeff = 0.0,
-                closure_width_left = 0,
-                closure_width_right = 0,
-                safe_start = 1,
-                safe_end = 0,
-                idx_safe = Int[]
-               )
+            row_nnz = Int[],
+            interior_mode = 0,
+            reference_row = 1,
+            reference_pattern = Int[],
+            coeff_sensitive = coeff_sensitive,
+            tol_coeff = 0.0,
+            closure_width_left = 0,
+            closure_width_right = 0,
+            safe_start = 1,
+            safe_end = 0,
+            idx_safe = Int[],
+        )
     end
 
     reference_row = clamp(fld(n, 2), 1, n)
@@ -72,32 +76,34 @@ function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
     row_nnz = [length(cols_by_row[i]) for i in 1:n]
     reference_pattern = patterns[reference_row]
 
-    ref_inf = isempty(vals_by_row[reference_row]) ? 0.0 : maximum(abs.(Float64.(vals_by_row[reference_row])))
-    tol_coeff_val = isnothing(tol_coeff) ? (1e3 * eps(Float64) * max(1.0, ref_inf)) : tol_coeff
+    ref_inf = isempty(vals_by_row[reference_row]) ? 0.0 :
+        maximum(abs.(Float64.(vals_by_row[reference_row])))
+    tol_coeff_val = isnothing(tol_coeff) ? (1.0e3 * eps(Float64) * max(1.0, ref_inf)) :
+        tol_coeff
 
     left = 0
     for i in 1:n
         _row_closure_flag(
-                          i,
-                          patterns,
-                          vals_by_row;
-                          reference_row = reference_row,
-                          coeff_sensitive = coeff_sensitive,
-                          tol_coeff = tol_coeff_val
-                         ) || break
+            i,
+            patterns,
+            vals_by_row;
+            reference_row = reference_row,
+            coeff_sensitive = coeff_sensitive,
+            tol_coeff = tol_coeff_val
+        ) || break
         left += 1
     end
 
     right = 0
     for i in n:-1:1
         _row_closure_flag(
-                          i,
-                          patterns,
-                          vals_by_row;
-                          reference_row = reference_row,
-                          coeff_sensitive = coeff_sensitive,
-                          tol_coeff = tol_coeff_val
-                         ) || break
+            i,
+            patterns,
+            vals_by_row;
+            reference_row = reference_row,
+            coeff_sensitive = coeff_sensitive,
+            tol_coeff = tol_coeff_val
+        ) || break
         right += 1
     end
 
@@ -106,18 +112,18 @@ function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
     idx_safe = safe_start <= safe_end ? collect(safe_start:safe_end) : Int[]
 
     return (
-            row_nnz = row_nnz,
-            interior_mode = length(reference_pattern),
-            reference_row = reference_row,
-            reference_pattern = reference_pattern,
-            coeff_sensitive = coeff_sensitive,
-            tol_coeff = tol_coeff_val,
-            closure_width_left = min(left, max(0, n - 1)),
-            closure_width_right = min(right, max(0, n - 1)),
-            safe_start = safe_start,
-            safe_end = safe_end,
-            idx_safe = idx_safe
-           )
+        row_nnz = row_nnz,
+        interior_mode = length(reference_pattern),
+        reference_row = reference_row,
+        reference_pattern = reference_pattern,
+        coeff_sensitive = coeff_sensitive,
+        tol_coeff = tol_coeff_val,
+        closure_width_left = min(left, max(0, n - 1)),
+        closure_width_right = min(right, max(0, n - 1)),
+        safe_start = safe_start,
+        safe_end = safe_end,
+        idx_safe = idx_safe,
+    )
 end
 
 """
@@ -126,7 +132,11 @@ end
 Estimate right boundary closure width from row-pattern mismatch (and optional
 coefficient mismatch) relative to an interior reference row.
 """
-function _estimate_right_closure_width(G::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integer}
+function _estimate_right_closure_width(
+        G::SparseMatrixCSC{
+            T, Ti,
+        }
+    ) where {T <: Real, Ti <: Integer}
     diag = _closure_diagnostics(G)
     return diag.closure_width_right
 end
@@ -137,10 +147,14 @@ function _maxabs_sparse(A::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integ
     return _maxabs(vals)
 end
 
-function _maxabs_sparse_no_origin(A::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integer}
+function _maxabs_sparse_no_origin(
+        A::SparseMatrixCSC{
+            T, Ti,
+        }
+    ) where {T <: Real, Ti <: Integer}
     I, _, V = findnz(A)
     m = zero(T)
-    @inbounds for k in eachindex(V)
+    for k in eachindex(V)
         if I[k] != 1
             av = abs(V[k])
             if av > m
@@ -180,10 +194,12 @@ Run validation checks for:
 
 Returns a `NamedTuple`.
 """
-function validate(ops::SphericalOperators;
-                  max_monomial_degree = ops.accuracy_order,
-                  verbose::Bool = true,
-                  near_boundary_points::Int = 8)
+function validate(
+        ops::SphericalOperators;
+        max_monomial_degree = ops.accuracy_order,
+        verbose::Bool = true,
+        near_boundary_points::Int = 8
+    )
     T = eltype(ops.r)
     Nh = length(ops.r)
     ones_h = fill(one(T), Nh)
@@ -203,7 +219,11 @@ function validate(ops::SphericalOperators;
         numerical = dot(u, ops.H * ones_h)
         exact = _integral_monomial(ops.R, k + ops.p)
         err = abs(numerical - exact)
-        push!(quadrature, (degree = k, numerical = numerical, exact = exact, abs_error = err))
+        push!(
+            quadrature, (
+                degree = k, numerical = numerical, exact = exact, abs_error = err,
+            )
+        )
     end
 
     gradient_even = NamedTuple[]
@@ -213,15 +233,15 @@ function validate(ops::SphericalOperators;
         dphi_num = ops.Geven * phi
         err = abs.(dphi_num .- dphi_exact)
         push!(
-              gradient_even,
-              (
-               degree = deg,
-               max_error = _maxabs(err),
-               max_error_safe = _safe_max(err, idx_safe),
-               interior_max_error = _safe_max(err, idx_safe),
-               max_error_near_boundary = _near_boundary_max(err, near_boundary_points)
-              )
-             )
+            gradient_even,
+            (
+                degree = deg,
+                max_error = _maxabs(err),
+                max_error_safe = _safe_max(err, idx_safe),
+                interior_max_error = _safe_max(err, idx_safe),
+                max_error_near_boundary = _near_boundary_max(err, near_boundary_points),
+            )
+        )
     end
 
     divergence_odd = NamedTuple[]
@@ -234,52 +254,52 @@ function validate(ops::SphericalOperators;
             div_num = ops.D * u
             err = abs.(div_num .- div_exact)
             push!(
-                  divergence_odd,
-                  (
-                   degree = deg,
-                   max_error = _maxabs(err),
-                   max_error_safe = _safe_max(err, idx_safe),
-                   interior_max_error = _safe_max(err, idx_safe),
-                   max_error_near_boundary = _near_boundary_max(err, near_boundary_points)
-                  )
-                 )
+                divergence_odd,
+                (
+                    degree = deg,
+                    max_error = _maxabs(err),
+                    max_error_safe = _safe_max(err, idx_safe),
+                    interior_max_error = _safe_max(err, idx_safe),
+                    max_error_near_boundary = _near_boundary_max(err, near_boundary_points),
+                )
+            )
         end
     end
 
     R_sbp = sparse(ops.H * ops.D + transpose(ops.Geven) * ops.H - ops.B)
     sbp = (
-           sbp_full = _maxabs_sparse(R_sbp),
-           sbp_no_origin = _maxabs_sparse_no_origin(R_sbp)
-          )
+        sbp_full = _maxabs_sparse(R_sbp),
+        sbp_no_origin = _maxabs_sparse_no_origin(R_sbp),
+    )
 
     r0 = ops.r[1]
     r0_ok = T <: AbstractFloat ? abs(r0) <= ops.atol : r0 == zero(T)
     diagnostics = (
-                   M = ops.M_full,
-                   Nh = ops.Nh,
-                   r0 = r0,
-                   r0_ok = r0_ok,
-                   closure_width = closure_right,
-                   closure_width_left = safe_left,
-                   closure_width_right = closure_right,
-                   closure_width_right_pattern = closure.closure_width_right,
-                   closure_width_right_operator = ops.closure_width,
-                   idx_safe = idx_safe,
-                   safe_count = length(idx_safe),
-                   near_boundary_points = near_boundary_points,
-                   accuracy_order = ops.accuracy_order,
-                   p = ops.p,
-                   R = ops.R,
-                   max_monomial_degree = maxdeg
-                  )
+        M = ops.M_full,
+        Nh = ops.Nh,
+        r0 = r0,
+        r0_ok = r0_ok,
+        closure_width = closure_right,
+        closure_width_left = safe_left,
+        closure_width_right = closure_right,
+        closure_width_right_pattern = closure.closure_width_right,
+        closure_width_right_operator = ops.closure_width,
+        idx_safe = idx_safe,
+        safe_count = length(idx_safe),
+        near_boundary_points = near_boundary_points,
+        accuracy_order = ops.accuracy_order,
+        p = ops.p,
+        R = ops.R,
+        max_monomial_degree = maxdeg,
+    )
 
     report = (
-              quadrature = quadrature,
-              gradient_even = gradient_even,
-              divergence_odd = divergence_odd,
-              sbp = sbp,
-              diagnostics = diagnostics
-             )
+        quadrature = quadrature,
+        gradient_even = gradient_even,
+        divergence_odd = divergence_odd,
+        sbp = sbp,
+        diagnostics = diagnostics,
+    )
 
     if verbose
         println("Validation summary")
@@ -296,30 +316,30 @@ function validate(ops::SphericalOperators;
         println("    k    max_error               max_error_safe          max_error_near_boundary")
         for row in gradient_even
             println(
-                    "    ",
-                    lpad(row.degree, 2),
-                    "    ",
-                    lpad(string(row.max_error), 22),
-                    "    ",
-                    lpad(string(row.max_error_safe), 22),
-                    "    ",
-                    lpad(string(row.max_error_near_boundary), 22)
-                   )
+                "    ",
+                lpad(row.degree, 2),
+                "    ",
+                lpad(string(row.max_error), 22),
+                "    ",
+                lpad(string(row.max_error_safe), 22),
+                "    ",
+                lpad(string(row.max_error_near_boundary), 22)
+            )
         end
 
         println("\n  Divergence on odd moments (u=r^k):")
         println("    k    max_error               max_error_safe          max_error_near_boundary")
         for row in divergence_odd
             println(
-                    "    ",
-                    lpad(row.degree, 2),
-                    "    ",
-                    lpad(string(row.max_error), 22),
-                    "    ",
-                    lpad(string(row.max_error_safe), 22),
-                    "    ",
-                    lpad(string(row.max_error_near_boundary), 22)
-                   )
+                "    ",
+                lpad(row.degree, 2),
+                "    ",
+                lpad(string(row.max_error), 22),
+                "    ",
+                lpad(string(row.max_error_safe), 22),
+                "    ",
+                lpad(string(row.max_error_near_boundary), 22)
+            )
         end
     end
 

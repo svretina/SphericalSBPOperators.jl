@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0-beta2"
 manifest_format = "2.1"
-project_hash = "5237d67e49591d67e703e57bcb8d201589f4932a"
+project_hash = "d43d424922f3656d94d4f8cfce8af1695d8bc1bd"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -2365,7 +2365,7 @@ weakdeps = ["ChainRulesCore"]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
 
 [[deps.SphericalSBPOperators]]
-deps = ["CairoMakie", "DrWatson", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "SciMLBase", "SparseArrays", "SummationByPartsOperators"]
+deps = ["CairoMakie", "DrWatson", "LaTeXStrings", "LinearAlgebra", "LinearSolve", "MakiePublication", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Printf", "SciMLBase", "SparseArrays", "SummationByPartsOperators"]
 path = "."
 uuid = "54f2a669-6442-4ec9-9f33-60161b4634ca"
 version = "0.1.0"
