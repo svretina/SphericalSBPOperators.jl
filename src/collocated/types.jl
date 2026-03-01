@@ -25,12 +25,11 @@ struct SphericalOperators{T <: Real, Ti <: Integer}
     accuracy_order::Int
     p::Int
     R::T
-    source
-    mode
+    source::Any
+    mode::Any
     atol::T
     snap_factor::Float64
     build_matrix::Symbol
     M_full::Int
     Nh::Int
 end
-

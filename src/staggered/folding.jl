@@ -1,15 +1,3 @@
-function _assert_origin(r::Vector{T}, atol::T) where {T <: Real}
-    isempty(r) && throw(ArgumentError("Half-grid is empty; could not locate nonnegative nodes."))
-    if T <: AbstractFloat
-        abs(r[1]) <= atol ||
-            throw(ArgumentError("Could not identify origin node: |r[1]| = $(abs(r[1])) > atol = $atol."))
-    else
-        r[1] == zero(T) ||
-            throw(ArgumentError("For exact arithmetic, first half-grid node must be exactly zero."))
-    end
-    return nothing
-end
-
 function _build_half_lookup(r::Vector{T}, atol::T) where {T <: AbstractFloat}
     scale = max(_maxabs(r), one(T))
     pair_tol = max(atol, T(64) * eps(T) * scale)
@@ -24,7 +12,10 @@ function _build_half_lookup(r::Vector{T}, ::T) where {T <: Real}
     return Dict{T, Int}(rj => j for (j, rj) in enumerate(r))
 end
 
-function _lookup_half_index(absx::T, lookup::NamedTuple, r::Vector{T}) where {T <: AbstractFloat}
+function _lookup_half_index(absx::T, lookup::NamedTuple, r::Vector{T}) where {
+        T <:
+        AbstractFloat,
+    }
     key = round(Int, absx / lookup.pair_tol)
     for dk in -2:2
         j = get(lookup.key_to_index, key + dk, 0)
@@ -41,18 +32,24 @@ function _lookup_half_index(absx::T, lookup::Dict{T, Int}, ::Vector{T}) where {T
     throw(ArgumentError("Could not pair mirrored grid point |x| = $absx with any half-grid node."))
 end
 
-function _build_folding_operators(xfull::Vector{T}; atol::T) where {T <: Real}
+function _build_folding_operators_staggered(xfull::Vector{T}; atol::T) where {T <: Real}
     M = length(xfull)
-    half_indices = sort(
-                        [i for i in eachindex(xfull) if xfull[i] >= -atol];
-                        by = i -> xfull[i]
-                       )
-    isempty(half_indices) && throw(ArgumentError("No half-grid nodes found with x >= -atol."))
+    sorted_full_idx = sortperm(xfull)
+    half_indices = [i for i in sorted_full_idx if xfull[i] >= -atol]
+    isempty(half_indices) &&
+        throw(ArgumentError("No staggered half-grid nodes found with x >= -atol."))
 
     r = xfull[half_indices]
-    _assert_origin(r, atol)
-
     Nh = length(r)
+    Nh > 0 || throw(ArgumentError("Staggered half-grid is empty."))
+    if T <: AbstractFloat
+        r[1] > atol ||
+            throw(ArgumentError("Expected staggered first node > 0, got r[1]=$(r[1]) with atol=$atol."))
+    else
+        r[1] > zero(T) ||
+            throw(ArgumentError("Expected staggered first node > 0 for exact arithmetic."))
+    end
+
     rowR = collect(1:Nh)
     valR = fill(one(T), Nh)
     Rop = sparse(rowR, half_indices, valR, Nh, M)
@@ -90,4 +87,3 @@ function _build_folding_operators(xfull::Vector{T}; atol::T) where {T <: Real}
 
     return r, Rop, Eeven, Eodd
 end
-

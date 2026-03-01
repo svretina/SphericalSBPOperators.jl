@@ -26,7 +26,8 @@ export default_wave_profile
 export bumpb, bumpb_profile
 export characteristic_initial_data
 export apply_symmetry_state!, apply_symmetry_rhs!, initialize_wave_state!
-export apply_characteristic_bc_sat!, boundary_characteristics, boundary_characteristic_residual
+export apply_characteristic_bc_sat!, boundary_characteristics,
+    boundary_characteristic_residual
 export apply_symmetry_constraints!, apply_boundary_conditions!, apply_wave_constraints!
 export check_wave_data_consistency
 export check_potential_consistency
@@ -40,16 +41,23 @@ export diagnose_reflecting_energy_bump
 export diagnose_reflecting_sat_energy_drift
 export energy_rate
 export WaveODEParams
+export Staggered
+export staggered_spherical_operators
+export scale_staggered_spherical_operators
+export validate_staggered
+export diagnose_staggered
+export interpret_staggered_diagnostics
 
-include("types.jl")
 include("snap.jl")
-include("fullgrid.jl")
-include("folding.jl")
-include("construct.jl")
-include("validation.jl")
-include("diagnostics.jl")
-include("wave_physics.jl")
-include("wave_solver.jl")
+include("collocated/types.jl")
+include("collocated/fullgrid.jl")
+include("collocated/folding.jl")
+include("collocated/construct.jl")
+include("collocated/validation.jl")
+include("collocated/diagnostics.jl")
+include("staggered/Staggered.jl")
+include("wave/Wave.jl")
+include("Plots/Plots.jl")
 
 """
     SphericalSBPOperators
@@ -88,5 +96,17 @@ Rational arithmetic is supported through type inference from inputs (e.g. `R = 1
 matching `SummationByPartsOperators`.
 """
 SphericalSBPOperators
+
+const StaggeredSphericalOperators = Staggered.SphericalOperators
+
+@inline staggered_spherical_operators(args...; kwargs...) = Staggered.spherical_operators(args...; kwargs...)
+@inline scale_staggered_spherical_operators(
+    args...; kwargs...
+) = Staggered.scale_spherical_operators(args...; kwargs...)
+@inline validate_staggered(args...; kwargs...) = Staggered.validate(args...; kwargs...)
+@inline diagnose_staggered(args...; kwargs...) = Staggered.diagnose(args...; kwargs...)
+@inline interpret_staggered_diagnostics(
+    args...; kwargs...
+) = Staggered.interpret_diagnostics(args...; kwargs...)
 
 end
