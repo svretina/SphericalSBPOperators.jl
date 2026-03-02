@@ -46,6 +46,7 @@ include("snap.jl")
 include("fullgrid.jl")
 include("folding.jl")
 include("construct.jl")
+include("gundlach/Gundlach.jl")
 include("validation.jl")
 include("diagnostics.jl")
 include("wave_physics.jl")
@@ -65,16 +66,17 @@ Accordingly:
 - `Geven` maps even fields to odd derivatives;
 - `D` maps odd radial fluxes to even divergence values.
 
-The metric-weighted SBP mass is
+The metric-weighted SBP masses are
 ```math
-H = H_{\\mathrm{cart,half}}\\,\\mathrm{diag}(r^p),
+S = H_{\\mathrm{cart,half}}\\,\\mathrm{diag}(r^p), \\qquad
+V = H_{\\mathrm{cart,half}}\\,\\mathrm{diag}(r^p),
 ```
 and the discrete SBP relation is
 ```math
-H D + G^T H = B, \\quad B = \\mathrm{diag}(0,\\dots,0,R^p).
+S D + G^T V = B, \\quad B = \\mathrm{diag}(0,\\dots,0,R^p).
 ```
 
-For `p > 0`, `H[1,1] = 0` at `r = 0`, so SBP does not constrain the origin row of
+For `p > 0`, `S[1,1] = 0` (and likewise `V[1,1] = 0`) at `r = 0`, so SBP does not constrain the origin row of
 `D`. This row is fixed using the removable-singularity condition for odd fluxes:
 ```math
 (Du)(0) = (p+1)u'(0),

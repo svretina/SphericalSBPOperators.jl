@@ -29,14 +29,15 @@ function _extract_diagonal(H::SparseMatrixCSC{T, Ti}; atol::T) where {T <: Real,
     return diag_entries
 end
 
+
 function _set_divergence_rows!(D::SparseMatrixCSC{T, Ti},
                                RHS::SparseMatrixCSC{T, Ti},
-                               Hdiag::Vector{T}) where {T <: Real, Ti <: Integer}
+                               Sdiag::Vector{T}) where {T <: Real, Ti <: Integer}
     n = size(D, 1)
     @inbounds for i in 2:n
-        hi = Hdiag[i]
+        hi = Sdiag[i]
         hi == zero(T) &&
-            throw(ArgumentError("Encountered H[$i,$i] = 0 while deriving divergence row from SBP."))
+            throw(ArgumentError("Encountered S[$i,$i] = 0 while deriving divergence row from SBP."))
         for j in 1:n
             v = RHS[i, j]
             if v != zero(T)
@@ -333,7 +334,8 @@ function _verify_coupled_origin_repair(Geven::SparseMatrixCSC{T, Ti},
                                        num_constraints::Int,
                                        divergence_degrees::Vector{Int},
                                        r::Vector{T},
-                                       Hdiag::Vector{T},
+                                       Sdiag::Vector{T},
+                                       Vdiag::Vector{T},
                                        Bdiag::Vector{T},
                                        p::Int) where {T <: Real, Ti <: Integer}
     Nh = length(r)
@@ -352,7 +354,7 @@ function _verify_coupled_origin_repair(Geven::SparseMatrixCSC{T, Ti},
     end
 
     @inbounds for i in rows_to_solve
-        hi = Hdiag[i]
+        hi = Sdiag[i]
         hi == zero(T) && return false
 
         for degree in divergence_degrees
@@ -360,7 +362,7 @@ function _verify_coupled_origin_repair(Geven::SparseMatrixCSC{T, Ti},
 
             numer = Bdiag[i] * r[i]^degree
             for j in 1:Nh
-                numer -= Geven[j, i] * Hdiag[j] * r[j]^degree
+                numer -= Geven[j, i] * Vdiag[j] * r[j]^degree
             end
 
             numer / hi == exact || return false
@@ -376,7 +378,8 @@ function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
                                     num_constraints::Int,
                                     divergence_degrees::Vector{Int},
                                     r::Vector{T},
-                                    Hdiag::Vector{T},
+                                    Sdiag::Vector{T},
+                                    Vdiag::Vector{T},
                                     Bdiag::Vector{T},
                                     p::Int) where {T <: Real, Ti <: Integer}
     row_count = length(rows_to_solve)
@@ -425,10 +428,10 @@ function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
         end
     end
 
-    # Divergence constraints on near-origin rows (odd monomials), expressed via G^T H.
+    # Divergence constraints on near-origin rows (odd monomials), expressed via G^T V.
     @inbounds for i in rows_to_solve
-        hi = convert(Rational{BigInt}, Hdiag[i])
-        hi != 0 // 1 || throw(ArgumentError("Encountered zero mass diagonal at i=$i in coupled divergence constraints."))
+        hi = convert(Rational{BigInt}, Sdiag[i])
+        hi != 0 // 1 || throw(ArgumentError("Encountered zero scalar-mass diagonal at i=$i in coupled divergence constraints."))
 
         for degree in divergence_degrees
             exact = convert(Rational{BigInt}, p + degree) * convert(Rational{BigInt}, r[i]^(degree - 1))
@@ -439,13 +442,13 @@ function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
                     continue
                 end
                 fixed_numer -= convert(Rational{BigInt}, Geven[j, i]) *
-                               convert(Rational{BigInt}, Hdiag[j]) *
+                               convert(Rational{BigInt}, Vdiag[j]) *
                                convert(Rational{BigInt}, r[j]^degree)
             end
 
             b[eq] = fixed_numer - hi * exact
             for j in rows_to_solve
-                A[eq, var_index[(j, i)]] = convert(Rational{BigInt}, Hdiag[j]) *
+                A[eq, var_index[(j, i)]] = convert(Rational{BigInt}, Vdiag[j]) *
                                            convert(Rational{BigInt}, r[j]^degree)
             end
             eq += 1
@@ -460,7 +463,8 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                                              Dfull,
                                              Gfull::SparseMatrixCSC{T, Ti},
                                              xfull::Vector{T},
-                                             Hdiag::Vector{T},
+                                             Sdiag::Vector{T},
+                                             Vdiag::Vector{T},
                                              Bdiag::Vector{T},
                                              r::Vector{T};
                                              p::Int,
@@ -533,7 +537,8 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                                                                                       num_constraints,
                                                                                       divergence_degrees,
                                                                                       r,
-                                                                                      Hdiag,
+                                                                                      Sdiag,
+                                                                                      Vdiag,
                                                                                       Bdiag,
                                                                                       p
                                                                                      )
@@ -575,7 +580,8 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                                                                           num_constraints,
                                                                           divergence_degrees,
                                                                           r,
-                                                                          Hdiag,
+                                                                          Sdiag,
+                                                                          Vdiag,
                                                                           Bdiag,
                                                                           p
                                                                          )
@@ -596,7 +602,8 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                                   num_constraints,
                                   divergence_degrees,
                                   r,
-                                  Hdiag,
+                                  Sdiag,
+                                  Vdiag,
                                   Bdiag,
                                   p
                                  ) ||
@@ -689,7 +696,7 @@ Scale an SBP operator set from its current uniform spacing to a new physical rad
 
 Scaling rules for `r = ρ r̂`:
 - `Geven`, `Godd`, `D` scale by `1/ρ`
-- `H` scales by `ρ^(p+1)`
+- `S`, `V` scale by `ρ^(p+1)`
 - `B` scales by `ρ^p`
 """
 function scale_spherical_operators(ops::SphericalOperators,
@@ -715,7 +722,8 @@ function scale_spherical_operators(ops::SphericalOperators,
         r_scaled[i] = convert(Tout, ops.r[i]) * scale_ratio
     end
 
-    H_scaled = _scale_sparse_matrix(ops.H, scale_ratio^(ops.p + 1), Tout; snap_factor = ops.snap_factor)
+    S_scaled = _scale_sparse_matrix(ops.S, scale_ratio^(ops.p + 1), Tout; snap_factor = ops.snap_factor)
+    V_scaled = _scale_sparse_matrix(ops.V, scale_ratio^(ops.p + 1), Tout; snap_factor = ops.snap_factor)
     B_scaled = _scale_sparse_matrix(ops.B, scale_ratio^ops.p, Tout; snap_factor = ops.snap_factor)
     Geven_scaled = _scale_sparse_matrix(ops.Geven, inv(scale_ratio), Tout; snap_factor = ops.snap_factor)
     Godd_scaled = _scale_sparse_matrix(ops.Godd, inv(scale_ratio), Tout; snap_factor = ops.snap_factor)
@@ -725,7 +733,8 @@ function scale_spherical_operators(ops::SphericalOperators,
 
     return SphericalOperators(
                               r_scaled,
-                              H_scaled,
+                              S_scaled,
+                              V_scaled,
                               B_scaled,
                               Geven_scaled,
                               Godd_scaled,
@@ -748,7 +757,9 @@ end
     spherical_operators(source; accuracy_order, N, R, p=2, mode=FastMode(),
                         atol=nothing, snap_factor=64.0, build_matrix=:probe,
                         custom_stencil_cols=nothing, return_canonical=false,
-                        target_eltype=nothing)
+                        target_eltype=nothing, mass_solver=:seed,
+                        mass_solver_opts=(;), seed_banded=true,
+                        seed_band_scale=1//10^12)
 
 Construct folded spherical-symmetry SBP operators on `[0, R]` from a Cartesian first
 derivative operator on `[-R, R]`.
@@ -769,7 +780,11 @@ function spherical_operators(source;
                              build_matrix::Symbol = :probe,
                              custom_stencil_cols::Union{Nothing, Vector{Int}} = nothing,
                              return_canonical::Bool = false,
-                             target_eltype::Union{Nothing, Type} = nothing)
+                             target_eltype::Union{Nothing, Type} = nothing,
+                             mass_solver::Symbol = :seed,
+                             mass_solver_opts::NamedTuple = (;),
+                             seed_banded::Bool = true,
+                             seed_band_scale::Real = 1 // 10^12)
     p >= 0 || throw(ArgumentError("`p` must satisfy p >= 0."))
     Nint = Int(N)
     Nint > 0 || throw(ArgumentError("`N` must be positive."))
@@ -799,36 +814,65 @@ function spherical_operators(source;
     half_factor = convert(T, 1) / convert(T, 2)
     Hcart_half = sparse(half_factor * (transpose(Eeven) * Hfull * Eeven))
     metric = spdiagm(0 => r .^ p)
-    H = sparse(Hcart_half * metric)
-    snap_sparse!(H; snap_factor = snap_factor)
+    S_seed = sparse(Hcart_half * metric)
+    snap_sparse!(S_seed; snap_factor = snap_factor)
+    S_seed_diag = _extract_diagonal(S_seed; atol = atol_construct)
+
+    closure_from_operator = _boundary_closure_width_from_operator(Dfull)
+    boundary_count = isnothing(closure_from_operator) ? nothing : Int(closure_from_operator)
+    mass_data = _gundlach_construct_mass_data(
+                                              r,
+                                              Geven,
+                                              S_seed_diag,
+                                              Int(accuracy_order),
+                                              p,
+                                              Nh;
+                                              boundary_count = boundary_count,
+                                              mass_solver = mass_solver,
+                                              mass_solver_opts = mass_solver_opts,
+                                              seed_banded = seed_banded,
+                                              seed_band_scale = seed_band_scale,
+                                              snap_factor = snap_factor
+                                             )
+    S = mass_data.S
+    V = mass_data.V
 
     B = spzeros(T, Nh, Nh)
     B[end, end] = r[end]^p
     snap_sparse!(B; snap_factor = snap_factor)
 
-    Hdiag = _extract_diagonal(H; atol = atol_construct)
+    Sdiag = _extract_diagonal(S; atol = atol_construct)
+    Vdiag = _diagonal_entries(V)
     Bdiag = fill(zero(T), Nh)
     Bdiag[end] = B[end, end]
 
-    repair_info = _repair_even_gradient_first_column!(
-                                                       Geven,
-                                                       Dfull,
-                                                       Gfull,
-                                                       xfull,
-                                                       Hdiag,
-                                                       Bdiag,
-                                                       r;
-                                                       p = p,
-                                                       atol = atol_construct,
-                                                       custom_stencil_cols = custom_stencil_cols
-                                                      )
+    # Experimental split-mass path uses the folded Geven without origin repair.
+    do_gegeven_repair = !_gundlach_skip_gegeven_repair(mass_solver, seed_banded)
+    interior_accuracy = _infer_interior_accuracy_order(Dfull)
+    rows_repaired = Int[]
+    if do_gegeven_repair
+        repair_info = _repair_even_gradient_first_column!(
+                                                           Geven,
+                                                           Dfull,
+                                                           Gfull,
+                                                           xfull,
+                                                           Sdiag,
+                                                           Vdiag,
+                                                           Bdiag,
+                                                           r;
+                                                           p = p,
+                                                           atol = atol_construct,
+                                                           custom_stencil_cols = custom_stencil_cols
+                                                          )
+        interior_accuracy = repair_info.interior_accuracy
+        rows_repaired = repair_info.rows_to_solve
 
-    remaining_corrupted = _rows_with_nonzero_first_column(Geven; atol = atol_construct)
-    isempty(remaining_corrupted) ||
-        throw(ArgumentError("First column cleanup failed; nonzero rows remain: $remaining_corrupted"))
+        remaining_corrupted = _rows_with_nonzero_first_column(Geven; atol = atol_construct)
+        isempty(remaining_corrupted) ||
+            throw(ArgumentError("First column cleanup failed; nonzero rows remain: $remaining_corrupted"))
+    end
 
     closure_pattern = _closure_diagnostics(Geven)
-    closure_from_operator = _boundary_closure_width_from_operator(Dfull)
     right_closure = isnothing(closure_from_operator) ?
                     closure_pattern.closure_width_right :
                     Int(closure_from_operator)
@@ -836,15 +880,15 @@ function spherical_operators(source;
     _assert_global_even_interior_accuracy(
                                           Geven,
                                           r,
-                                          repair_info.interior_accuracy,
-                                          repair_info.rows_to_solve,
+                                          interior_accuracy,
+                                          rows_repaired,
                                           right_closure;
                                           atol = atol_construct
                                          )
 
-    RHS = sparse(B - transpose(Geven) * H)
+    RHS = sparse(B - transpose(Geven) * V)
     D = spzeros(T, Nh, Nh)
-    _set_divergence_rows!(D, RHS, Hdiag)
+    _set_divergence_rows!(D, RHS, Sdiag)
     _set_origin_row!(D, Godd, p)
     snap_sparse!(D; snap_factor = snap_factor)
 
@@ -854,13 +898,14 @@ function spherical_operators(source;
 
     ops_canonical = SphericalOperators(
                                        r,
-                                       H,
+                                       S,
+                                       V,
                                        B,
                                        Geven,
                                        Godd,
                                        D,
                                        closure_width,
-                                       repair_info.interior_accuracy,
+                                       interior_accuracy,
                                        p,
                                        convert(T, R_canonical),
                                        source,

@@ -120,7 +120,7 @@ end
 
 Mutating symmetry constraints on the RHS variables.
 
-For stability with metric-weighted mass (`H[1,1]=0` for `p>0`), enforce invariance
+For stability with metric-weighted masses (`S[1,1]=V[1,1]=0` for `p>0`), enforce invariance
 of the odd subspace at the origin by imposing `dΞ(0)=0`.
 """
 function apply_symmetry_rhs!(dΠ::AbstractVector,
@@ -209,10 +209,10 @@ end
 Apply SBP-SAT boundary penalties at the outer boundary `r=R`.
 
 Penalty form:
-- `dΠ[end] += -σΠ * invHN * ρ`
-- `dΞ[end] += -σΞ * invHN * ρ`
+- `dΠ[end] += -σΠ * invSN * ρ`
+- `dΞ[end] += -σΞ * invVN * ρ`
 
-where `HN = H[end,end]` and `ρ` is a characteristic residual.
+where `SN = S[end,end]`, `VN = V[end,end]`, and `ρ` is a characteristic residual.
 
 Implemented conditions:
 - `:absorbing`: `ρ = w_in = Π + Ξ`, with
@@ -253,10 +253,13 @@ function apply_characteristic_bc_sat!(dΠ::AbstractVector,
                     )
     twoT = convert(T, 2)
     BNN = convert(T, ops.B[end, end])
-    HNN = convert(T, ops.H[end, end])
-    HNN == zero(T) && throw(ArgumentError("`H[end,end]` must be nonzero for SAT penalties."))
+    SNN = convert(T, ops.S[end, end])
+    VNN = convert(T, ops.V[end, end])
+    SNN == zero(T) && throw(ArgumentError("`S[end,end]` must be nonzero for SAT penalties on dΠ."))
+    VNN == zero(T) && throw(ArgumentError("`V[end,end]` must be nonzero for SAT penalties on dΞ."))
 
-    invHN = one(T) / HNN
+    invSN = one(T) / SNN
+    invVN = one(T) / VNN
     chars = boundary_characteristics(convert(T, Π[end]), convert(T, Ξ[end]))
     w_in = chars.w_in
     w_out = chars.w_out
@@ -281,8 +284,8 @@ function apply_characteristic_bc_sat!(dΠ::AbstractVector,
         throw(ArgumentError("Unsupported boundary condition `$bc_norm`. Use :absorbing, :reflecting, :dirichlet, or :none."))
     end
 
-    dΠ[end] -= convert(eltype(dΠ), σΠ * invHN * ρ)
-    dΞ[end] -= convert(eltype(dΞ), σΞ * invHN * ρ)
+    dΠ[end] -= convert(eltype(dΠ), σΠ * invSN * ρ)
+    dΞ[end] -= convert(eltype(dΞ), σΞ * invVN * ρ)
 
     return nothing
 end
@@ -541,9 +544,12 @@ function _sat_boundary_jacobian_entries(ops::SphericalOperators;
     end
 
     BNN = Float64(ops.B[end, end])
-    HNN = Float64(ops.H[end, end])
-    HNN == 0.0 && throw(ArgumentError("`H[end,end]` must be nonzero for SAT Jacobian terms."))
-    invHN = 1.0 / HNN
+    SNN = Float64(ops.S[end, end])
+    VNN = Float64(ops.V[end, end])
+    SNN == 0.0 && throw(ArgumentError("`S[end,end]` must be nonzero for SAT Jacobian terms on dΠ."))
+    VNN == 0.0 && throw(ArgumentError("`V[end,end]` must be nonzero for SAT Jacobian terms on dΞ."))
+    invSN = 1.0 / SNN
+    invVN = 1.0 / VNN
 
     dPi_dPi = 0.0
     dPi_dXi = 0.0
@@ -551,16 +557,16 @@ function _sat_boundary_jacobian_entries(ops::SphericalOperators;
     dXi_dXi = 0.0
 
     if bc_norm === :absorbing
-        coeff_pi = -(BNN / 2.0) * invHN
-        coeff_xi = -(BNN / 2.0) * invHN
+        coeff_pi = -(BNN / 2.0) * invSN
+        coeff_xi = -(BNN / 2.0) * invVN
         dPi_dPi += coeff_pi
         dPi_dXi += coeff_pi
         dXi_dPi += coeff_xi
         dXi_dXi += coeff_xi
     elseif bc_norm === :reflecting
-        dPi_dXi += -(BNN * invHN)
+        dPi_dXi += -(BNN * invSN)
     elseif bc_norm === :dirichlet
-        dXi_dPi += -(BNN * invHN)
+        dXi_dPi += -(BNN * invVN)
     else
         throw(ArgumentError("Unsupported boundary condition `$bc_norm`. Use :absorbing, :reflecting, :dirichlet, or :none."))
     end
@@ -737,12 +743,12 @@ end
 
 Discrete wave energy
 
-`E = 0.5 * (Π' * H * Π + Ξ' * H * Ξ)`.
+`E = 0.5 * (Π' * S * Π + Ξ' * V * Ξ)`.
 """
 function wave_energy(ops::SphericalOperators, Π::AbstractVector, Ξ::AbstractVector)
     n = length(ops.r)
     length(Π) == n || throw(DimensionMismatch("`Π` length must match grid size $(n)."))
     length(Ξ) == n || throw(DimensionMismatch("`Ξ` length must match grid size $(n)."))
 
-    return 0.5 * (dot(Π, ops.H * Π) + dot(Ξ, ops.H * Ξ))
+    return 0.5 * (dot(Π, ops.S * Π) + dot(Ξ, ops.V * Ξ))
 end

@@ -169,6 +169,27 @@ function _integral_monomial(R::T, q::Int) where {T <: Real}
     return R^(q + 1) / convert(T, q + 1)
 end
 
+@inline _odd_cap(k::Int) = k < 1 ? 0 : (isodd(k) ? k : k - 1)
+@inline _odd_degrees(k::Int) = k < 1 ? Int[] : collect(1:2:_odd_cap(k))
+@inline _even_cap(k::Int) = k < 0 ? -2 : (iseven(k) ? k : k - 1)
+@inline _even_degrees(k::Int) = k < 0 ? Int[] : collect(0:2:_even_cap(k))
+
+function _resolve_split_quadrature_orders(accuracy_order::Int, p::Int, maxdeg::Int)
+    quadrature_cap = fld(accuracy_order, 2)
+    legacy_default = min(2 * accuracy_order - p - 1, quadrature_cap)
+    legacy_quad_max = min(maxdeg, legacy_default)
+    legacy_quad_max = max(-1, legacy_quad_max)
+
+    s_quad_order = max(0, _even_cap(legacy_quad_max))
+    v_quad_order = legacy_quad_max >= 1 ? _odd_cap(legacy_quad_max) : -1
+    return (
+            quadrature_cap = quadrature_cap,
+            legacy_quad_max = legacy_quad_max,
+            s_quad_order = s_quad_order,
+            v_quad_order = v_quad_order,
+           )
+end
+
 """
     validate(ops; max_monomial_degree=ops.accuracy_order, verbose=true)
 
@@ -189,21 +210,30 @@ function validate(ops::SphericalOperators;
     ones_h = fill(one(T), Nh)
     maxdeg = Int(max_monomial_degree)
     closure = _closure_diagnostics(ops.Geven)
-    closure_right = max(closure.closure_width_right, ops.closure_width)
-    # Divergence rows can be influenced by the modified near-origin gradient columns;
-    # use a conservative left-safe offset tied to right closure width as well.
-    safe_left = max(closure.closure_width_left, closure_right + 1)
+    boundary_closure = max(closure.closure_width_right, ops.closure_width)
+    quad_orders = _resolve_split_quadrature_orders(ops.accuracy_order, ops.p, maxdeg)
+    # Interior FD region excludes the boundary closure count on both sides.
+    safe_left = boundary_closure
     safe_start = 1 + safe_left
-    safe_end = Nh - closure_right
+    safe_end = Nh - boundary_closure
     idx_safe = safe_start <= safe_end ? collect(safe_start:safe_end) : Int[]
 
-    quadrature = NamedTuple[]
-    for k in 0:maxdeg
-        u = ops.r .^ k
-        numerical = dot(u, ops.H * ones_h)
-        exact = _integral_monomial(ops.R, k + ops.p)
+    quadrature_scalar = NamedTuple[]
+    for q in _even_degrees(quad_orders.s_quad_order)
+        u = ops.r .^ q
+        numerical = dot(u, ops.S * ones_h)
+        exact = _integral_monomial(ops.R, q + ops.p)
         err = abs(numerical - exact)
-        push!(quadrature, (degree = k, numerical = numerical, exact = exact, abs_error = err))
+        push!(quadrature_scalar, (degree = q, numerical = numerical, exact = exact, abs_error = err))
+    end
+
+    quadrature_vector = NamedTuple[]
+    for q in _odd_degrees(quad_orders.v_quad_order)
+        u = ops.r .^ q
+        numerical = dot(u, ops.V * ones_h)
+        exact = _integral_monomial(ops.R, q + ops.p)
+        err = abs(numerical - exact)
+        push!(quadrature_vector, (degree = q, numerical = numerical, exact = exact, abs_error = err))
     end
 
     gradient_even = NamedTuple[]
@@ -246,7 +276,7 @@ function validate(ops::SphericalOperators;
         end
     end
 
-    R_sbp = sparse(ops.H * ops.D + transpose(ops.Geven) * ops.H - ops.B)
+    R_sbp = sparse(ops.S * ops.D + transpose(ops.Geven) * ops.V - ops.B)
     sbp = (
            sbp_full = _maxabs_sparse(R_sbp),
            sbp_no_origin = _maxabs_sparse_no_origin(R_sbp)
@@ -259,9 +289,9 @@ function validate(ops::SphericalOperators;
                    Nh = ops.Nh,
                    r0 = r0,
                    r0_ok = r0_ok,
-                   closure_width = closure_right,
+                   closure_width = boundary_closure,
                    closure_width_left = safe_left,
-                   closure_width_right = closure_right,
+                   closure_width_right = boundary_closure,
                    closure_width_right_pattern = closure.closure_width_right,
                    closure_width_right_operator = ops.closure_width,
                    idx_safe = idx_safe,
@@ -270,11 +300,46 @@ function validate(ops::SphericalOperators;
                    accuracy_order = ops.accuracy_order,
                    p = ops.p,
                    R = ops.R,
-                   max_monomial_degree = maxdeg
+                   max_monomial_degree = maxdeg,
+                   quadrature_cap = quad_orders.quadrature_cap,
+                   legacy_quad_max = quad_orders.legacy_quad_max,
+                   s_quad_order = quad_orders.s_quad_order,
+                   v_quad_order = quad_orders.v_quad_order
                   )
+
+    quadrature = NamedTuple[]
+    for row in quadrature_scalar
+        push!(
+              quadrature,
+              (
+               degree = row.degree,
+               numerical = row.numerical,
+               exact = row.exact,
+               abs_error = row.abs_error,
+               family = :scalar
+              )
+             )
+    end
+    for row in quadrature_vector
+        push!(
+              quadrature,
+              (
+               degree = row.degree,
+               numerical = row.numerical,
+               exact = row.exact,
+               abs_error = row.abs_error,
+               family = :vector
+              )
+             )
+    end
 
     report = (
               quadrature = quadrature,
+              quadrature_split = (
+                                  scalar = quadrature_scalar,
+                                  vector = quadrature_vector,
+                                  settings = quad_orders
+                                 ),
               gradient_even = gradient_even,
               divergence_odd = divergence_odd,
               sbp = sbp,
@@ -286,9 +351,18 @@ function validate(ops::SphericalOperators;
         println("  M_full = $(diagnostics.M), Nh = $(diagnostics.Nh), closure_left = $(diagnostics.closure_width_left), closure_right = $(diagnostics.closure_width_right), safe_count = $(diagnostics.safe_count)")
         println("  r[1] = $(diagnostics.r0), r0_ok = $(diagnostics.r0_ok)")
         println("  sbp_full = $(sbp.sbp_full), sbp_no_origin = $(sbp.sbp_no_origin)")
-        println("\n  Quadrature moments (u=r^k):")
-        println("    k    abs_error")
-        for row in quadrature
+        println("\n  Split quadrature settings:")
+        println("    cap = $(diagnostics.quadrature_cap), legacy_max = $(diagnostics.legacy_quad_max), s_quad_order = $(diagnostics.s_quad_order), v_quad_order = $(diagnostics.v_quad_order)")
+
+        println("\n  Scalar-mass quadrature moments (S, even q):")
+        println("    q    abs_error")
+        for row in quadrature_scalar
+            println("    ", lpad(row.degree, 2), "    ", row.abs_error)
+        end
+
+        println("\n  Vector-mass quadrature moments (V, odd q):")
+        println("    q    abs_error")
+        for row in quadrature_vector
             println("    ", lpad(row.degree, 2), "    ", row.abs_error)
         end
 

@@ -497,25 +497,41 @@ function diagnose(ops::SphericalOperators,
 
     half_factor = convert(eltype(xfull), 1) / convert(eltype(xfull), 2)
     Hcart_half_direct = sparse(half_factor * (transpose(Eeven) * Hfull * Eeven))
-    Hdiag, Hoffdiag_max = _diag_and_offdiag_max_float(ops.H)
+    Sdiag, Soffdiag_max = _diag_and_offdiag_max_float(ops.S)
+    Vdiag, Voffdiag_max = _diag_and_offdiag_max_float(ops.V)
     Hcart_diag = _diag_and_offdiag_max_float(Hcart_half_direct)[1]
 
-    mass_ratio_errors = Float64[]
+    scalar_mass_ratio_errors = Float64[]
     for i in 2:Nh
         rp = r[i]^ops.p
         rp == 0.0 && continue
-        inferred = Hdiag[i] / rp
-        push!(mass_ratio_errors, abs(inferred - Hcart_diag[i]))
+        inferred = Sdiag[i] / rp
+        push!(scalar_mass_ratio_errors, abs(inferred - Hcart_diag[i]))
     end
-    mass_diag_ratio_max = isempty(mass_ratio_errors) ? 0.0 : maximum(mass_ratio_errors)
+
+    vector_mass_ratio_errors = Float64[]
+    for i in 2:Nh
+        rp = r[i]^ops.p
+        rp == 0.0 && continue
+        inferred = Vdiag[i] / rp
+        push!(vector_mass_ratio_errors, abs(inferred - Hcart_diag[i]))
+    end
+
+    scalar_mass_diag_ratio_max = isempty(scalar_mass_ratio_errors) ? 0.0 : maximum(scalar_mass_ratio_errors)
+    vector_mass_diag_ratio_max = isempty(vector_mass_ratio_errors) ? 0.0 : maximum(vector_mass_ratio_errors)
 
     operator_diag = (
                     geven_diff_max = Geven_diff_max,
                     geven_diff_max_all_rows = Geven_diff_max_all_rows,
                     geven_repaired_rows = repaired_rows,
                     godd_diff_max = Godd_diff_max,
-                    H_offdiag_max = Hoffdiag_max,
-                    Hcart_diag_ratio_max_error = mass_diag_ratio_max
+                    S_offdiag_max = Soffdiag_max,
+                    V_offdiag_max = Voffdiag_max,
+                    Scart_diag_ratio_max_error = scalar_mass_diag_ratio_max,
+                    Vcart_diag_ratio_max_error = vector_mass_diag_ratio_max,
+                    # Backward-compatible aliases where H corresponds to scalar mass S.
+                    H_offdiag_max = Soffdiag_max,
+                    Hcart_diag_ratio_max_error = scalar_mass_diag_ratio_max
                    )
 
     # Closure diagnostics
@@ -524,7 +540,8 @@ function diagnose(ops::SphericalOperators,
     closure_right_used = isnothing(closure_right_from_operator) ?
                          closure_info.closure_width_right :
                          max(closure_info.closure_width_right, closure_right_from_operator)
-    safe_left = max(closure_info.closure_width_left, closure_right_used + 1)
+    # Interior FD region excludes the boundary closure count on both sides.
+    safe_left = closure_right_used
     safe_start = 1 + safe_left
     safe_end = Nh - closure_right_used
     idx_safe = safe_start <= safe_end ? collect(safe_start:safe_end) : Int[]
@@ -721,7 +738,7 @@ function diagnose(ops::SphericalOperators,
                     )
 
     # SBP residual diagnostics
-    Rsbp = sparse(ops.H * ops.D + transpose(ops.Geven) * ops.H - ops.B)
+    Rsbp = sparse(ops.S * ops.D + transpose(ops.Geven) * ops.V - ops.B)
     mask_no_origin = trues(Nh)
     if Nh >= 1
         mask_no_origin[1] = false

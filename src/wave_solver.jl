@@ -1103,11 +1103,12 @@ end
 
 function _skew_adjointness_report(ops::SphericalOperators; bigfloat_check::Bool)
     n = length(ops.r)
-    H = Matrix{Float64}(ops.H)
+    S = Matrix{Float64}(ops.S)
+    V = Matrix{Float64}(ops.V)
     D = Matrix{Float64}(ops.D)
     G = Matrix{Float64}(ops.Geven)
     Z = zeros(Float64, n, n)
-    Hblk = [H Z; Z H]
+    Hblk = [S Z; Z V]
     keep = setdiff(collect(1:(2 * n)), [1, n + 1])
 
     function summarize_S(S::Matrix{Float64})
@@ -1135,12 +1136,12 @@ function _skew_adjointness_report(ops::SphericalOperators; bigfloat_check::Bool)
     interior = summarize_S(S_interior)
 
     Sat = zeros(Float64, n, n)
-    Sat[end, end] = -Float64(ops.B[end, end]) / Float64(ops.H[end, end])
+    Sat[end, end] = -Float64(ops.B[end, end]) / Float64(ops.S[end, end])
     A_reflecting_sat = [Z D + Sat; G Z]
     S_reflecting_sat = transpose(A_reflecting_sat) * Hblk + Hblk * A_reflecting_sat
     reflecting_sat = summarize_S(S_reflecting_sat)
 
-    sbp_residual = H * D + transpose(G) * H - Matrix{Float64}(ops.B)
+    sbp_residual = S * D + transpose(G) * V - Matrix{Float64}(ops.B)
     sbp_full = _maxabs_vec(sbp_residual)
     sbp_no_origin = _maxabs_vec(sbp_residual[2:end, :])
 
@@ -1321,7 +1322,7 @@ function diagnose_reflecting_energy_bump(;
     end
 
     if skew.sbp_no_origin <= 1e-10 && skew.sbp_full > 1e-8
-        push!(conclusions, "Energy defect is dominated by the unconstrained origin row (H[1,1]=0 degeneracy), not outer SAT.")
+        push!(conclusions, "Energy defect is dominated by the unconstrained origin row (S[1,1]=V[1,1]=0 degeneracy), not outer SAT.")
     end
 
     if scaling.mode == :fixed_dt && length(scaling.metrics) == 3
@@ -1488,7 +1489,7 @@ end
 
 Semidiscrete energy rate
 
-`dE/dt = Π' * H * dΠ + Ξ' * H * dΞ`.
+`dE/dt = Π' * S * dΠ + Ξ' * V * dΞ`.
 """
 function energy_rate(ops::SphericalOperators,
                      Π::AbstractVector,
@@ -1500,7 +1501,7 @@ function energy_rate(ops::SphericalOperators,
     length(Ξ) == n || throw(DimensionMismatch("`Ξ` length must match grid size $(n)."))
     length(dΠ) == n || throw(DimensionMismatch("`dΠ` length must match grid size $(n)."))
     length(dΞ) == n || throw(DimensionMismatch("`dΞ` length must match grid size $(n)."))
-    return dot(Π, ops.H * dΠ) + dot(Ξ, ops.H * dΞ)
+    return dot(Π, ops.S * dΠ) + dot(Ξ, ops.V * dΞ)
 end
 
 @inline function _boundary_flux_term(ops::SphericalOperators, Π::AbstractVector, Ξ::AbstractVector)
@@ -1538,7 +1539,7 @@ function _runtime_rhs_energy_diagnostics(ops::SphericalOperators,
 
     flux = _boundary_flux_term(ops, Πf, Ξf)
     R_sbp = sbp_residual_matrix === nothing ?
-            (ops.H * ops.D + transpose(ops.Geven) * ops.H - ops.B) :
+            (ops.S * ops.D + transpose(ops.Geven) * ops.V - ops.B) :
             sbp_residual_matrix
     sbp_residual_term = Float64(dot(Πf, R_sbp * Ξf))
     chars = boundary_characteristics(Πf[end], Ξf[end])
@@ -1605,7 +1606,7 @@ function _run_reflecting_case_energy_diagnostics(ops::SphericalOperators;
                         )
 
     params = WaveODEParams(ops; boundary_condition = :reflecting, enforce_origin = enforce_origin)
-    R_sbp = ops.H * ops.D + transpose(ops.Geven) * ops.H - ops.B
+    R_sbp = ops.S * ops.D + transpose(ops.Geven) * ops.V - ops.B
     K_used = min(K, length(sol.t))
     rows = NamedTuple[]
     dE_vals = Vector{Float64}(undef, K_used)
@@ -1753,9 +1754,10 @@ function _skew_report_from_runtime_A(ops::SphericalOperators,
                                      A_runtime::Matrix{Float64})
     n = length(ops.r)
     m = 2 * n
-    H = Matrix{Float64}(ops.H)
+    S_mass = Matrix{Float64}(ops.S)
+    V_mass = Matrix{Float64}(ops.V)
     Z = zeros(Float64, n, n)
-    Hblk = [H Z; Z H]
+    Hblk = [S_mass Z; Z V_mass]
     S = transpose(A_runtime) * Hblk + Hblk * A_runtime
 
     full = _maxabs_matrix_with_arg(S)
@@ -1868,16 +1870,17 @@ function _bigfloat_reflecting_rate(ops::SphericalOperators,
     Ξb = BigFloat.(Ξ)
     D = BigFloat.(Matrix(ops.D))
     G = BigFloat.(Matrix(ops.Geven))
-    H = BigFloat.(Matrix(ops.H))
+    S_mass = BigFloat.(Matrix(ops.S))
+    V_mass = BigFloat.(Matrix(ops.V))
     dΠ = D * Ξb
     dΞ = G * Πb
     if enforce_origin && !isempty(dΞ)
         dΞ[1] = big"0"
     end
     BNN = BigFloat(ops.B[end, end])
-    HNN = BigFloat(ops.H[end, end])
-    dΠ[end] -= (BNN / HNN) * Ξb[end]
-    dE = dot(Πb, H * dΠ) + dot(Ξb, H * dΞ)
+    SNN = BigFloat(ops.S[end, end])
+    dΠ[end] -= (BNN / SNN) * Ξb[end]
+    dE = dot(Πb, S_mass * dΠ) + dot(Ξb, V_mass * dΞ)
     return dE
 end
 

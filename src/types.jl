@@ -5,7 +5,8 @@ Container of folded half-grid operators for spherical-symmetry SBP discretizatio
 
 Fields:
 - `r`: half-grid coordinates on `[0, R]`
-- `H`: metric-weighted mass matrix
+- `S`: scalar (even-field) metric-weighted mass matrix
+- `V`: vector (odd-field) metric-weighted mass matrix
 - `B`: boundary operator with only outer boundary contribution
 - `Geven`: folded gradient for even fields
 - `Godd`: folded derivative for odd fields
@@ -16,7 +17,8 @@ Fields:
 """
 struct SphericalOperators{T <: Real, Ti <: Integer}
     r::Vector{T}
-    H::SparseMatrixCSC{T, Ti}
+    S::SparseMatrixCSC{T, Ti}
+    V::SparseMatrixCSC{T, Ti}
     B::SparseMatrixCSC{T, Ti}
     Geven::SparseMatrixCSC{T, Ti}
     Godd::SparseMatrixCSC{T, Ti}
@@ -34,3 +36,33 @@ struct SphericalOperators{T <: Real, Ti <: Integer}
     Nh::Int
 end
 
+function Base.getproperty(ops::SphericalOperators, name::Symbol)
+    if name === :H
+        return getfield(ops, :S)
+    end
+    return getfield(ops, name)
+end
+
+function Base.propertynames(::SphericalOperators, private::Bool = false)
+    base = (
+            :r,
+            :S,
+            :V,
+            :B,
+            :Geven,
+            :Godd,
+            :D,
+            :closure_width,
+            :accuracy_order,
+            :p,
+            :R,
+            :source,
+            :mode,
+            :atol,
+            :snap_factor,
+            :build_matrix,
+            :M_full,
+            :Nh,
+           )
+    return private ? base : (base..., :H)
+end

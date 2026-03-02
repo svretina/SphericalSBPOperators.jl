@@ -1,0 +1,231 @@
+\documentclass[
+  aps,
+  pre,
+  reprint,
+  superscriptaddress,
+  nofootinbib
+]{revtex4-2}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsfonts,bm,mathtools}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\Divp}{\operatorname{Div}_{p}}
+\newcommand{\Rmass}{R_{\mathrm{mass}}}
+\newcommand{\Rsbp}{R_{\mathrm{SBP}}}
+\newcommand{\Ddiv}{D_{\mathrm{div}}}
+
+\begin{document}
+
+\title{Split-Parity Mass-Matrix Construction for Folded Spherical SBP Operators}
+
+\author{SphericalSBPOperators Development Team}
+\affiliation{Computational Science and Engineering}
+
+\date{\today}
+
+\begin{abstract}
+We document an experimental split-mass construction for folded spherical-symmetry
+summation-by-parts (SBP) operators.
+The method uses distinct norm matrices for parity sectors:
+$S$ for even/scalar fields and $V$ for odd/vector fields.
+Given a fixed gradient operator $G$, the divergence operator is induced in the interior by
+$\Ddiv=-S^{-1}G^{T}V$.
+The construction is designed for optimization workflows through explicit structural
+constraints on $(S,V)$ by order, monomial exactness constraints on odd regular
+test functions, origin constraints, and normalization/asymptotic constraints.
+We provide step-by-step implementation details and explicit matrix structures for
+orders 2, 4, 6, and 8, and report representative sixth-order diagnostics at grid spacing
+$h=1$.
+\end{abstract}
+
+\maketitle
+
+\section{Problem Setup}
+On a folded half-grid $r_i=ih$, $i=0,\dots,N$, we consider the radial operator
+\begin{equation}
+  \Divp(u)=\frac{1}{r^p}\partial_r(r^p u),
+\end{equation}
+with parity split at $r=0$:
+even/scalar variable $\Pi$ and odd/vector variable $\Psi$.
+
+The split SBP identity is
+\begin{equation}
+  S D + G^{T}V = B,
+\end{equation}
+where $D$ is divergence and $G$ is gradient.
+For interior elimination (ignoring $B$ in the elimination step),
+\begin{equation}
+  \Ddiv \equiv D_{\mathrm{div}} = -S^{-1}G^{T}V.
+  \label{eq:ddiv}
+\end{equation}
+
+\section{Order-Dependent Structure of \texorpdfstring{$S$}{S} and \texorpdfstring{$V$}{V}}
+\subsection{Order 2}
+\begin{equation}
+  S=\diag(s_0,\dots,s_N), \qquad V=\diag(v_0,\dots,v_N), \qquad V=S.
+\end{equation}
+
+\subsection{Order 4 (collocated)}
+$S$ is diagonal.
+$V$ is symmetric with origin-local off-diagonals only.
+In physical node indexing $(0,1,2,\dots)$:
+\begin{equation}
+  V_{0,1}=V_{1,0}=u_{3/2}, \qquad
+  V_{1,2}=V_{2,1}=u_{5/2},
+\end{equation}
+all other off-diagonals exactly zero.
+
+In the current Julia implementation (1-based matrix indices), this corresponds to
+nonzero off-diagonal entries only at $(2,3)$ and $(3,4)$.
+
+\subsection{Order 4 (staggered)}
+$S$ is diagonal.
+$V$ allows only one origin-local off-diagonal:
+\begin{equation}
+  V_{0,1}=V_{1,0}=u_1,
+\end{equation}
+all others zero
+(implementation indices $(2,3)$ only).
+
+\subsection{Orders 6 and 8}
+$S$ remains diagonal.
+$V$ is diagonal in the far field and has a compact symmetric origin block.
+Using $N_m=\mathrm{order}/2$ and radius $k=N_m-1$:
+\begin{itemize}
+  \item order 6: $k=2$, near-origin bandwidth $2k+1=5$;
+  \item order 8: $k=3$, near-origin bandwidth $2k+1=7$.
+\end{itemize}
+Only off-diagonals inside this compact block are allowed.
+
+\section{Optimization-Oriented Constraints}
+\subsection{Monomial exactness constraints}
+For odd regular monomials
+\begin{equation}
+  \psi^{(k)}(r)=r^k,\qquad k\in\{1,3,\dots,2N_m-1\},
+\end{equation}
+the target is
+\begin{equation}
+  (\partial_r+p/r)\,r^k = (p+k)\,r^{k-1}.
+\end{equation}
+The linear-in-$(S,V)$ residual form is
+\begin{equation}
+  \Rmass_i^{(k)} =
+  -\bigl(G^T(V\psi^{(k)})\bigr)_i
+  - s_i (p+k) r_i^{k-1},
+\end{equation}
+with hard equality constraints on enforced rows (typically interior rows).
+
+\subsection{Origin constraints}
+For centered order 2:
+\begin{equation}
+  s_1=(1+p)s_0.
+\end{equation}
+For centered order 4:
+\begin{align}
+  (1+p)s_0 &= v_1-\tfrac18 u_{3/2}+\tfrac58 u_{5/2}, \\
+  v_2 &= v_1+\tfrac{63}{8}u_{3/2}-\tfrac{27}{8}u_{5/2}.
+\end{align}
+
+\subsection{Normalization and asymptotic constraints}
+Because scaling $S$ and $V$ together leaves Eq.~\eqref{eq:ddiv} unchanged, one
+normalization constraint is added (e.g., $s_I=r_I^p$), with optional far-field matching
+constraints $s_i\approx r_i^p$ and $v_i\approx r_i^p$ near $r=R$.
+
+\subsection{Positivity and SPD}
+Typical parameterization for positivity:
+\begin{equation}
+  s_i=e^{\sigma_i}, \qquad v_i=e^{\nu_i}.
+\end{equation}
+For SBP4 centered origin block, SPD can be enforced through a small-block Cholesky
+parameterization.
+
+\section{Step-by-Step Procedure}
+\begin{enumerate}
+  \item Build the folded gradient matrix $G$ on $[0,R]$.
+  \item Apply a near-origin gradient repair on selected rows to remove first-column
+  coupling while preserving target even-monomial exactness (implemented as an exact
+  linear solve on a compact stencil block in the current code path).
+  \item Build $(S,V)$ under order-dependent structural constraints.
+  \item Evaluate constraint residuals:
+  monomial exactness, origin constraints, normalization/far-field constraints.
+  \item Form divergence by Eq.~\eqref{eq:ddiv} (or equivalently from the repaired
+  SBP relation in the assembled operator path).
+  \item Assemble operational $D$ in the solver path (including boundary/origin handling).
+  \item Validate:
+  $\Rsbp = SD+G^TV-B$, gradient and divergence monomial errors, and quadrature errors.
+\end{enumerate}
+
+\section{Current Implementation Notes}
+In \texttt{SphericalSBPOperators.jl}, two public helpers were added:
+\begin{itemize}
+  \item \texttt{construct\_split\_mass\_matrices(...)} for structured $(S,V)$ construction;
+  \item \texttt{split\_mass\_constraint\_report(...)} for reporting constraint residuals and SPD/structure checks.
+\end{itemize}
+Naming convention is fixed as:
+$G$ for gradient and $D$ for divergence.
+
+In the default assembly path used for production runs, the folded gradient is
+not taken as immutable: a coupled near-origin repair is applied to $G$ before
+forming $D$.
+This repair solves a local linear system to satisfy even-monomial gradient
+conditions together with odd-monomial divergence consistency induced by
+$(S,V)$.
+
+\section{Representative Sixth-Order Diagnostics (\texorpdfstring{$h=1$}{h=1})}
+Configuration:
+order $6$, $N=32$, $R=32$, $p=2$, hence $h=R/N=1$.
+Interior diagnostic rows: $8:27$.
+
+\begin{table}[t]
+  \caption{Interior and origin errors for derivatives/SBP, and whole-domain quadrature errors.}
+  \label{tab:diag6}
+  \begin{ruledtabular}
+  \begin{tabular}{lll}
+    Quantity & Interior error & Origin error \\
+    \hline
+    $\|\Rsbp\|_\infty$ & $1.42\times 10^{-14}$ & $0$ \\
+    grad, $k=0$ & $2.43\times 10^{-17}$ & $0$ \\
+    grad, $k=2$ & $2.84\times 10^{-14}$ & $0$ \\
+    grad, $k=4$ & $7.28\times 10^{-12}$ & $0$ \\
+    grad, $k=6$ & $1.49\times 10^{-8}$ & $0$ \\
+    div, $k=1$ & $2.66\times 10^{-15}$ & $0$ \\
+    div, $k=3$ & $9.09\times 10^{-13}$ & $0$ \\
+  \end{tabular}
+  \end{ruledtabular}
+\end{table}
+
+Whole-domain quadrature errors:
+\begin{align}
+  \text{even ($S$):}\;& q=0:\;1.82\times 10^{-12}, \quad q=2:\;9.31\times 10^{-10},\\
+  \text{odd ($V$):}\;& q=1:\;8.33\times 10^{-3}, \quad q=3:\;3.89\times 10^{-2}.
+\end{align}
+
+\section{Discussion}
+The current sixth-order run shows near-machine interior consistency for SBP,
+gradient, and divergence diagnostics, and exact origin values in the reported tests.
+Odd quadrature errors are comparatively larger, indicating that structural admissibility
+alone is not sufficient; optimization of origin-block and far-field mass parameters is
+needed to simultaneously satisfy odd quadrature targets and high-order divergence
+exactness.
+
+\section{Conclusions}
+We established an optimization-ready split-parity mass framework:
+\begin{equation}
+  (S,V,G)\;\Longrightarrow\;\Ddiv=-S^{-1}G^TV,
+\end{equation}
+with explicit per-order mass structures, origin constraints, and diagnostics.
+The framework is now in place for constrained optimization studies of $(S,V)$
+for SBP orders $2/4/6/8$ on collocated and staggered configurations.
+
+\end{document}
