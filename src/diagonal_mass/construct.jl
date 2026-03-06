@@ -767,7 +767,12 @@ derivative operator on `[-R, R]`.
 Implementation details:
 - construction is performed on a canonical grid with `Δr = 1` and `Rational{BigInt}`
   arithmetic to support exact row repair;
+- masses use the diagonal folded Cartesian metric form (`S = V = Hcart_half * diag(r^p)`);
 - optional scaling to simulation coordinates is applied at the end.
+
+Notes:
+- `mass_solver`, `mass_solver_opts`, `seed_banded`, and `seed_band_scale` are kept
+  for API compatibility and are currently ignored in diagonal-mass mode.
 """
 function spherical_operators(source;
                              accuracy_order,
@@ -816,38 +821,20 @@ function spherical_operators(source;
     metric = spdiagm(0 => r .^ p)
     S_seed = sparse(Hcart_half * metric)
     snap_sparse!(S_seed; snap_factor = snap_factor)
-    S_seed_diag = _extract_diagonal(S_seed; atol = atol_construct)
-
+    S = S_seed
+    V = copy(S_seed)
     closure_from_operator = _boundary_closure_width_from_operator(Dfull)
-    boundary_count = isnothing(closure_from_operator) ? nothing : Int(closure_from_operator)
-    mass_data = _gundlach_construct_mass_data(
-                                              r,
-                                              Geven,
-                                              S_seed_diag,
-                                              Int(accuracy_order),
-                                              p,
-                                              Nh;
-                                              boundary_count = boundary_count,
-                                              mass_solver = mass_solver,
-                                              mass_solver_opts = mass_solver_opts,
-                                              seed_banded = seed_banded,
-                                              seed_band_scale = seed_band_scale,
-                                              snap_factor = snap_factor
-                                             )
-    S = mass_data.S
-    V = mass_data.V
 
     B = spzeros(T, Nh, Nh)
     B[end, end] = r[end]^p
     snap_sparse!(B; snap_factor = snap_factor)
 
     Sdiag = _extract_diagonal(S; atol = atol_construct)
-    Vdiag = _diagonal_entries(V)
+    Vdiag = _extract_diagonal(V; atol = atol_construct)
     Bdiag = fill(zero(T), Nh)
     Bdiag[end] = B[end, end]
 
-    # Experimental split-mass path uses the folded Geven without origin repair.
-    do_gegeven_repair = !_gundlach_skip_gegeven_repair(mass_solver, seed_banded)
+    do_gegeven_repair = true
     interior_accuracy = _infer_interior_accuracy_order(Dfull)
     rows_repaired = Int[]
     if do_gegeven_repair
