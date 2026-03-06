@@ -171,7 +171,7 @@ function build_step_system(problem, active_count::Int)
 
     @assert 0 <= active_count <= npairs
     for k in (active_count + 1):npairs
-        A, b = add_fix_col!(A, b, idx.idx_voff(k), 0 // 1)
+        A, b = add_fix_col!(A, b, idx.idx_voff(k), big(0) // big(1))
     end
     return A, b
 end
