@@ -6,14 +6,22 @@ using SphericalSBPOperators
 const Mod = SphericalSBPOperators
 rb(x) = Mod._sbp8_as_big_rational(x)
 
-const BR = 19
-const BW = 7
-const DIAG_FREE_END = 24
-const TAIL_START = 24
+const BR = parse(Int, get(ENV, "SBP8_BR", "19"))
+const BW = parse(Int, get(ENV, "SBP8_BW", "7"))
+const DIAG_FREE_END = parse(Int, get(ENV, "SBP8_DIAG_FREE_END", "24"))
+const TAIL_START = parse(Int, get(ENV, "SBP8_TAIL_START", "24"))
 
-const BASE_ZERO_PAIRS = [(1, 2), (1, 3), (1, 4), (13, 16), (14, 16), (15, 16)]
-const RUNB_ZERO_PAIRS = [(14, 17), (15, 17), (16, 17)]
-const S1_ANCHOR = rb(11) // rb(20)
+const BASE_ZERO_MODE = lowercase(get(ENV, "SBP8_BASE_ZERO_MODE", "legacy"))
+const SPEC_MODE = lowercase(get(ENV, "SBP8_SPEC_MODE", "default"))
+const S1_ANCHOR = begin
+    sval = get(ENV, "SBP8_S1_ANCHOR", "11/20")
+    if occursin("/", sval)
+        a, b = split(sval, "/"; limit=2)
+        parse(BigInt, strip(a)) // parse(BigInt, strip(b))
+    else
+        parse(BigInt, strip(sval)) // big(1)
+    end
+end
 const ZERO_Q = big(0) // big(1)
 
 const IMAG_TOL = 0.0
@@ -39,15 +47,67 @@ struct RunSpec
     extra_zero_pairs::Vector{Tuple{Int,Int}}
 end
 
+function parse_int_list(envkey::String, default_csv::String)
+    raw = get(ENV, envkey, default_csv)
+    vals = Int[]
+    for tok in split(raw, ',')
+        t = strip(tok)
+        isempty(t) && continue
+        push!(vals, parse(Int, t))
+    end
+    isempty(vals) && error("No valid integers parsed from $envkey='$raw'")
+    return vals
+end
+
+function base_zero_pairs()
+    if BASE_ZERO_MODE == "legacy"
+        return [(1, 2), (1, 3), (1, 4), (13, 16), (14, 16), (15, 16)]
+    elseif BASE_ZERO_MODE == "relaxed_1416_1516"
+        return [(1, 2), (1, 3), (1, 4), (13, 16)]
+    elseif BASE_ZERO_MODE == "minimal"
+        return [(1, 2), (1, 3), (1, 4)]
+    else
+        error("Unknown SBP8_BASE_ZERO_MODE='$BASE_ZERO_MODE'.")
+    end
+end
+
+function zero_set_library()
+    if SPEC_MODE == "default"
+        return [
+            ("base111", [(14, 17), (15, 17), (16, 17)]),
+            ("drop1417", [(15, 17), (16, 17)]),
+            ("drop1517", [(14, 17), (16, 17)]),
+            ("drop1617", [(14, 17), (15, 17)]),
+        ]
+    elseif SPEC_MODE == "extended"
+        return [
+            ("base111", [(14, 17), (15, 17), (16, 17)]),
+            ("drop1417", [(15, 17), (16, 17)]),
+            ("drop1517", [(14, 17), (16, 17)]),
+            ("drop1617", [(14, 17), (15, 17)]),
+            ("free_all17", Tuple{Int,Int}[]),
+            ("only1417", [(14, 17)]),
+            ("only1517", [(15, 17)]),
+            ("only1617", [(16, 17)]),
+            ("kill1718", [(14, 17), (15, 17), (16, 17), (17, 18)]),
+            ("kill1719", [(14, 17), (15, 17), (16, 17), (17, 19)]),
+            ("kill1819", [(14, 17), (15, 17), (16, 17), (18, 19)]),
+            ("free_all17_k1718", [(17, 18)]),
+            ("free_all17_k1719", [(17, 19)]),
+            ("free_all17_k1819", [(18, 19)]),
+            ("free_all17_k1718_1819", [(17, 18), (18, 19)]),
+            ("free_all17_k1719_1819", [(17, 19), (18, 19)]),
+        ]
+    else
+        error("Unknown SBP8_SPEC_MODE='$SPEC_MODE'.")
+    end
+end
+
 function build_specs()
-    sets = [
-        ("base111", [(14, 17), (15, 17), (16, 17)]),
-        ("drop1417", [(15, 17), (16, 17)]),
-        ("drop1517", [(14, 17), (16, 17)]),
-        ("drop1617", [(14, 17), (15, 17)]),
-    ]
+    fr7_list = parse_int_list("SBP8_FR7_LIST", "10,11,12")
+    sets = zero_set_library()
     specs = RunSpec[]
-    for fr7 in (10, 11, 12)
+    for fr7 in fr7_list
         for (tag, zset) in sets
             push!(specs, RunSpec("fr7$(fr7)_$(tag)", fr7, zset))
         end
@@ -253,7 +313,7 @@ function build_problem(spec::RunSpec)
         A, b = add_fix_col!(A, b, col_vdiag_tail, sq[TAIL_START])
     end
 
-    for pr in vcat(BASE_ZERO_PAIRS, spec.extra_zero_pairs)
+    for pr in vcat(base_zero_pairs(), spec.extra_zero_pairs)
         k = get(pair_to_k, pr, 0)
         k == 0 && continue
         A, b = add_fix_col!(A, b, idx.idx_voff(k), rb(0))
@@ -563,8 +623,10 @@ function write_summary(path, problem, baseline, probes, selected_cols, stage1, s
         println(io, "br = ", BR, ", bw = ", BW)
         println(io, "diag_free_indices = 1:", DIAG_FREE_END)
         println(io, "tail_fixed_start = ", TAIL_START)
-        println(io, "base_zero_pairs = ", BASE_ZERO_PAIRS)
+        println(io, "base_zero_mode = ", BASE_ZERO_MODE)
+        println(io, "base_zero_pairs = ", base_zero_pairs())
         println(io, "extra_zero_pairs = ", problem.spec.extra_zero_pairs)
+        println(io, "spec_mode = ", SPEC_MODE)
         println(io, "hard spectral checks: max_imag == ", IMAG_TOL, ", max_real < ", REAL_NEG_TOL)
         println(io, "hard constraints: exact solve, S SPD (diag>0), V SPD (full PD), s11>0")
         println(io, "s11 anchor = ", S1_ANCHOR)
