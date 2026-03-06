@@ -14,6 +14,7 @@ const TAIL_START = 24
 const BASE_ZERO_PAIRS = [(1, 2), (1, 3), (1, 4), (13, 16), (14, 16), (15, 16)]
 const RUNB_ZERO_PAIRS = [(14, 17), (15, 17), (16, 17)]
 const S1_ANCHOR = rb(11) // rb(20)
+const ZERO_Q = big(0) // big(1)
 
 const IMAG_TOL = 0.0
 const REAL_NEG_TOL = 0.0
@@ -666,11 +667,11 @@ function run_spec(spec::RunSpec)
     end
 
     centerA = default_center_for_col(problem, colA)
-    centerB = colB > 0 ? default_center_for_col(problem, colB) : 0 // 1
+    centerB = colB > 0 ? default_center_for_col(problem, colB) : ZERO_Q
     step1A = coarse_step_for_col(problem, colA)
-    step1B = colB > 0 ? coarse_step_for_col(problem, colB) : (0 // 1)
+    step1B = colB > 0 ? coarse_step_for_col(problem, colB) : ZERO_Q
     step2A = fine_step_for_col(problem, colA)
-    step2B = colB > 0 ? fine_step_for_col(problem, colB) : (0 // 1)
+    step2B = colB > 0 ? fine_step_for_col(problem, colB) : ZERO_Q
 
     open(tsv_path, "w") do io
         write_header(io)
