@@ -756,12 +756,13 @@ function run_greedy_gap!(io, problem)
     npairs = length(problem.pairs)
     rng = MersenneTwister(GREEDY_SEED)
 
-    active = falses(npairs)
+    # Start from the dense feasible architecture, then prune/add via bit flips.
+    active = trues(npairs)
     curr_res, curr_eq, curr_unknown = solve_for_active(problem, active)
     curr_sd = stability_distance(curr_res)
     strict_count = curr_res.strict_hard ? 1 : 0
     row_count = 0
-    best = (res=curr_res, row=0, label="start_empty", active_pairs=count(active))
+    best = (res=curr_res, row=0, label="start_dense", active_pairs=count(active))
 
     write_row(
         io,
