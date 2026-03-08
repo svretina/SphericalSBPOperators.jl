@@ -726,7 +726,7 @@ function run_subspace_opt(problem, xp, Nbasis, alpha_start::Vector{Float64}, tra
     close(trace_io)
 
     alpha_opt = Optim.minimizer(opt_result)
-    res_opt = evaluate_x_float(problem, xpf .+ Nf * alpha_opt)
+    res_opt = evaluate_alpha_for_opt(problem, xp, Nbasis, alpha_opt)
 
     if res_opt.obj < best_obj
         best_obj = res_opt.obj
