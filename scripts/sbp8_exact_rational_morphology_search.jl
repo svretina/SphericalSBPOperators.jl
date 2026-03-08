@@ -7,10 +7,14 @@ const Mod = SphericalSBPOperators
 rb(x) = Mod._sbp8_as_big_rational(x)
 
 function parse_q(s::AbstractString)
-    t = strip(s)
+    t = replace(strip(s), "//" => "/")
     if occursin("/", t)
         a, b = split(t, "/"; limit=2)
         return parse(BigInt, strip(a)) // parse(BigInt, strip(b))
+    end
+    if occursin(r"[\.eE]", t)
+        r = rationalize(parse(BigFloat, t); tol=big"1e-30")
+        return big(numerator(r)) // big(denominator(r))
     end
     return parse(BigInt, t) // big(1)
 end
@@ -53,7 +57,7 @@ const TARGET_X_FILE = get(
 const USE_TARGET_PROJECTION = parse_bool("SBP8_USE_TARGET_PROJECTION", "true")
 const ALPHA_PROJ_TOL = parse(Float64, get(ENV, "SBP8_ALPHA_PROJ_TOL", "1e-8"))
 
-const STEP_SET = parse_q_list("SBP8_ALPHA_STEPS", "1/100,1/10,1/1")
+const STEP_SET = parse_q_list("SBP8_ALPHA_STEPS", "1/1000,1/10000,1/100000")
 const MAX_PASSES = parse(Int, get(ENV, "SBP8_MAX_PASSES", "40"))
 const STOP_ON_NEGATIVE = parse_bool("SBP8_STOP_ON_NEGATIVE", "true")
 
@@ -466,6 +470,23 @@ function exact_residual_stats(A::Matrix{Rational{BigInt}}, b::Vector{Rational{Bi
     return (all_zero=all_zero, max_num=max_num)
 end
 
+function enforce_exact_residual!(
+    A::Matrix{Rational{BigInt}},
+    b::Vector{Rational{BigInt}},
+    x::Vector{Rational{BigInt}},
+    label::AbstractString,
+)
+    stats = exact_residual_stats(A, b, x)
+    if !stats.all_zero
+        error(
+            "FATAL: Exact accuracy constraints violated for " *
+            label *
+            "! Max numerator error: $(stats.max_num)",
+        )
+    end
+    return stats
+end
+
 function build_matrices(problem, x::Vector{Rational{BigInt}})
     idx = problem.idx
     N = problem.N
@@ -683,7 +704,7 @@ function main()
     end
 
     base_res = evaluate_x(problem, xp)
-    base_exact = exact_residual_stats(problem.A, problem.b, xp)
+    base_exact = enforce_exact_residual!(problem.A, problem.b, xp, "x_p (particular solution)")
 
     proj_info = nothing
     alpha0 = nothing
@@ -695,8 +716,8 @@ function main()
         proj_info = project_target_alpha(xp, Nbasis, x_target, ALPHA_PROJ_TOL)
         alpha0 = proj_info.alpha_rat
         x_start = proj_info.x_start
+        start_exact = enforce_exact_residual!(problem.A, problem.b, x_start, "x_start (projected)")
         start_res = evaluate_x(problem, x_start)
-        start_exact = exact_residual_stats(problem.A, problem.b, x_start)
         println(
             "Using projected start from target x file. fit_err=",
             proj_info.fit_err,
@@ -719,7 +740,7 @@ function main()
     final_x = search.best_x
     final_alpha = search.best_alpha
 
-    final_exact = exact_residual_stats(problem.A, problem.b, final_x)
+    final_exact = enforce_exact_residual!(problem.A, problem.b, final_x, "final best solution")
     S_mat, V_mat = build_matrices(problem, final_x)
 
     write_pairs(pairs_out, pairs)
