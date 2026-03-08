@@ -4,6 +4,8 @@ using Optim
 using SummationByPartsOperators
 using SphericalSBPOperators
 
+include("sbp8_exact_subspace_grid_fallback.jl")
+
 const Mod = SphericalSBPOperators
 rb(x) = Mod._sbp8_as_big_rational(x)
 
@@ -817,7 +819,9 @@ function main()
         "Invalid optimization start (obj=Inf). status=$(start_float_res.status), reason=$(start_float_res.reason), source=$alpha_start_source",
     )
 
-    opt = run_subspace_opt(problem, xp, Nbasis, alpha_start, trace_path)
+    opt = OPT_METHOD == "microgrid" ?
+          run_micro_grid_search(problem, xp, Nbasis, alpha_start, trace_path) :
+          run_subspace_opt(problem, xp, Nbasis, alpha_start, trace_path)
 
     alpha_best_float = opt.best_alpha
     best_float_res = opt.best_res
@@ -904,10 +908,16 @@ function main()
         println(io, "  start_float_max_real = ", start_float_res.max_real)
         println(io, "  start_float_max_imag = ", start_float_res.max_imag)
         println(io, "  start_float_v_full_pd = ", start_float_res.v_full_pd)
-        println(io, "  converged = ", Optim.converged(opt.result))
-        println(io, "  iterations = ", Optim.iterations(opt.result))
-        println(io, "  f_calls = ", opt.eval_count)
-        println(io, "  minimum = ", Optim.minimum(opt.result))
+        if haskey(opt, :result)
+            println(io, "  converged = ", Optim.converged(opt.result))
+            println(io, "  iterations = ", Optim.iterations(opt.result))
+            println(io, "  f_calls = ", opt.eval_count)
+            println(io, "  minimum = ", Optim.minimum(opt.result))
+        else
+            println(io, "  converged = microgrid_done")
+            println(io, "  f_calls = ", opt.eval_count)
+            println(io, "  minimum = ", opt.best_res.obj)
+        end
         println(io, "  best_float_obj = ", best_float_res.obj)
         println(io, "  best_float_max_real = ", best_float_res.max_real)
         println(io, "  best_float_max_imag = ", best_float_res.max_imag)
