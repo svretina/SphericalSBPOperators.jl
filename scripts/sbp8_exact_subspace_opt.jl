@@ -665,7 +665,7 @@ end
 
 function run_subspace_opt(problem, xp, Nbasis, alpha_start::Vector{Float64}, trace_path::String)
     method = OPT_METHOD == "neldermead" ?
-             NelderMead(initial_simplex=Optim.AffineSimplexer(NM_SIMPLEX_A, NM_SIMPLEX_B)) :
+             NelderMead(initial_simplex=Optim.AffineSimplexer(a=NM_SIMPLEX_A, b=NM_SIMPLEX_B)) :
              error("Unsupported SBP8_OPT_METHOD='$OPT_METHOD'. Use 'neldermead'.")
     nfree = size(Nbasis, 2)
     length(alpha_start) == nfree || error("alpha_start length mismatch: $(length(alpha_start)) != $nfree")
