@@ -67,6 +67,8 @@ const ALPHA_PROJ_TOL = parse(Float64, get(ENV, "SBP8_ALPHA_PROJ_TOL", "1e-8"))
 const OPT_METHOD = lowercase(strip(get(ENV, "SBP8_OPT_METHOD", "neldermead")))
 const OPT_MAX_ITERS = parse(Int, get(ENV, "SBP8_OPT_MAX_ITERS", "2000"))
 const OPT_PENALTY_IMAG = parse(Float64, get(ENV, "SBP8_OPT_PENALTY_IMAG", "1000.0"))
+const NM_SIMPLEX_A = parse(Float64, get(ENV, "SBP8_NM_SIMPLEX_A", "1e-6"))
+const NM_SIMPLEX_B = parse(Float64, get(ENV, "SBP8_NM_SIMPLEX_B", "1e-6"))
 const TARGET_MAX_REAL = parse(Float64, get(ENV, "SBP8_TARGET_MAX_REAL", "-1e-8"))
 const FLOAT_IMAG_TOL = parse(Float64, get(ENV, "SBP8_FLOAT_IMAG_TOL", "1e-12"))
 const EVAL_ALPHA_TOL = parse(Float64, get(ENV, "SBP8_EVAL_ALPHA_TOL", "1e-8"))
@@ -662,7 +664,9 @@ function write_pairs(path::String, pairs::Vector{Tuple{Int,Int}})
 end
 
 function run_subspace_opt(problem, xp, Nbasis, alpha_start::Vector{Float64}, trace_path::String)
-    method = OPT_METHOD == "neldermead" ? NelderMead() : error("Unsupported SBP8_OPT_METHOD='$OPT_METHOD'. Use 'neldermead'.")
+    method = OPT_METHOD == "neldermead" ?
+             NelderMead(initial_simplex=AffineSimplexer(NM_SIMPLEX_A, NM_SIMPLEX_B)) :
+             error("Unsupported SBP8_OPT_METHOD='$OPT_METHOD'. Use 'neldermead'.")
     nfree = size(Nbasis, 2)
     length(alpha_start) == nfree || error("alpha_start length mismatch: $(length(alpha_start)) != $nfree")
 
@@ -881,6 +885,8 @@ function main()
         println(io, "opt_method = ", OPT_METHOD)
         println(io, "opt_max_iters = ", OPT_MAX_ITERS)
         println(io, "opt_penalty_imag = ", OPT_PENALTY_IMAG)
+        println(io, "nm_simplex_a = ", NM_SIMPLEX_A)
+        println(io, "nm_simplex_b = ", NM_SIMPLEX_B)
         println(io, "eval_alpha_tol = ", EVAL_ALPHA_TOL)
         println(io, "target_max_real = ", TARGET_MAX_REAL)
         println(io, "float_imag_tol = ", FLOAT_IMAG_TOL)
