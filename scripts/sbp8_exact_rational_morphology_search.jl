@@ -45,6 +45,13 @@ const PAIR_FILE = get(
     "SBP8_PAIR_FILE",
     "remote_results/sbp8_vsearch_2026-03-07/distill_dense_20260307_194005/main/results/sbp8_distill_dense_pairs_gt_thresh.tsv",
 )
+const TARGET_X_FILE = get(
+    ENV,
+    "SBP8_TARGET_X_FILE",
+    "remote_results/sbp8_vsearch_2026-03-07/distill_dense_20260307_194005/main/results/sbp8_distill_dense_reduced_best_x.tsv",
+)
+const USE_TARGET_PROJECTION = parse_bool("SBP8_USE_TARGET_PROJECTION", "true")
+const ALPHA_PROJ_TOL = parse(Float64, get(ENV, "SBP8_ALPHA_PROJ_TOL", "1e-8"))
 
 const STEP_SET = parse_q_list("SBP8_ALPHA_STEPS", "1/100,1/10,1/1")
 const MAX_PASSES = parse(Int, get(ENV, "SBP8_MAX_PASSES", "40"))
@@ -115,6 +122,36 @@ function load_pairs(path::String)
     end
     isempty(pairs) && error("No pairs parsed from $path.")
     return pairs
+end
+
+function load_x_vector(path::String)
+    isfile(path) || error("Target x file not found: $path")
+    entries = Tuple{Int,Rational{BigInt}}[]
+    open(path, "r") do io
+        first = true
+        for ln in eachline(io)
+            line = strip(ln)
+            isempty(line) && continue
+            if first
+                first = false
+                if startswith(lowercase(line), "col")
+                    continue
+                end
+            end
+            fields = split(line, '\t')
+            length(fields) >= 2 || continue
+            c = parse(Int, strip(fields[1]))
+            v = parse_q(strip(fields[end]))
+            push!(entries, (c, v))
+        end
+    end
+    isempty(entries) && error("No entries parsed from target x file: $path")
+    n = maximum(first.(entries))
+    x = fill(ZERO_Q, n)
+    for (c, v) in entries
+        x[c] = v
+    end
+    return x
 end
 
 function rref_matrix(A::Matrix{Rational{BigInt}})
@@ -377,6 +414,42 @@ function compose_x(xp::Vector{Rational{BigInt}}, Nbasis::Matrix{Rational{BigInt}
     return x
 end
 
+function rationalize_big(x::Float64, tol::Float64)
+    r = rationalize(x; tol=tol)
+    return big(numerator(r)) // big(denominator(r))
+end
+
+function project_target_alpha(
+    xp::Vector{Rational{BigInt}},
+    Nbasis::Matrix{Rational{BigInt}},
+    x_target::Vector{Rational{BigInt}},
+    tol::Float64,
+)
+    length(x_target) == length(xp) || error("Target x length mismatch: $(length(x_target)) != $(length(xp)).")
+
+    Nf = Matrix{Float64}(Nbasis)
+    delta = Float64.(x_target .- xp)
+    alpha_float = try
+        Nf \ delta
+    catch
+        pinv(Nf) * delta
+    end
+
+    alpha_rat = Rational{BigInt}[rationalize_big(a, tol) for a in alpha_float]
+    x_start = compose_x(xp, Nbasis, alpha_rat)
+
+    fit_err = norm(Nf * alpha_float - delta)
+    roundtrip_err = norm(Float64.(x_start .- x_target))
+
+    return (
+        alpha_float=alpha_float,
+        alpha_rat=alpha_rat,
+        x_start=x_start,
+        fit_err=fit_err,
+        roundtrip_err=roundtrip_err,
+    )
+end
+
 function exact_residual_stats(A::Matrix{Rational{BigInt}}, b::Vector{Rational{BigInt}}, x::Vector{Rational{BigInt}})
     r = A * x - b
     all_zero = true
@@ -451,11 +524,19 @@ function write_pairs(path::String, pairs::Vector{Tuple{Int,Int}})
     end
 end
 
-function run_search(problem, xp::Vector{Rational{BigInt}}, Nbasis::Matrix{Rational{BigInt}}, free_cols::Vector{Int}, trace_path::String)
+function run_search(
+    problem,
+    xp::Vector{Rational{BigInt}},
+    Nbasis::Matrix{Rational{BigInt}},
+    free_cols::Vector{Int},
+    trace_path::String;
+    alpha0::Union{Nothing,Vector{Rational{BigInt}}}=nothing,
+)
     nfree = size(Nbasis, 2)
-    alpha = zeros(Rational{BigInt}, nfree)
+    alpha = isnothing(alpha0) ? zeros(Rational{BigInt}, nfree) : copy(alpha0)
+    length(alpha) == nfree || error("alpha0 length mismatch: $(length(alpha)) != $nfree")
 
-    current_x = copy(xp)
+    current_x = compose_x(xp, Nbasis, alpha)
     current_res = evaluate_x(problem, current_x)
     best_res = current_res
     best_x = current_x
@@ -604,7 +685,36 @@ function main()
     base_res = evaluate_x(problem, xp)
     base_exact = exact_residual_stats(problem.A, problem.b, xp)
 
-    search = run_search(problem, xp, Nbasis, free_cols, trace_path)
+    proj_info = nothing
+    alpha0 = nothing
+    start_res = base_res
+    start_exact = base_exact
+
+    if USE_TARGET_PROJECTION && isfile(TARGET_X_FILE)
+        x_target = load_x_vector(TARGET_X_FILE)
+        proj_info = project_target_alpha(xp, Nbasis, x_target, ALPHA_PROJ_TOL)
+        alpha0 = proj_info.alpha_rat
+        x_start = proj_info.x_start
+        start_res = evaluate_x(problem, x_start)
+        start_exact = exact_residual_stats(problem.A, problem.b, x_start)
+        println(
+            "Using projected start from target x file. fit_err=",
+            proj_info.fit_err,
+            " roundtrip_err=",
+            proj_info.roundtrip_err,
+            " start(max_real,max_imag)=(",
+            start_res.max_real,
+            ",",
+            start_res.max_imag,
+            ")",
+        )
+    elseif USE_TARGET_PROJECTION
+        println("Target projection requested, but target file not found: ", TARGET_X_FILE)
+    else
+        println("Target projection disabled; starting from alpha=0.")
+    end
+
+    search = run_search(problem, xp, Nbasis, free_cols, trace_path; alpha0=alpha0)
     final_res = search.best_res
     final_x = search.best_x
     final_alpha = search.best_alpha
@@ -622,6 +732,9 @@ function main()
         println(io, "fr7 = ", FR7)
         println(io, "block_stop = ", BLOCK_STOP)
         println(io, "pair_file = ", PAIR_FILE)
+        println(io, "target_x_file = ", TARGET_X_FILE)
+        println(io, "use_target_projection = ", USE_TARGET_PROJECTION)
+        println(io, "alpha_proj_tol = ", ALPHA_PROJ_TOL)
         println(io, "n_pairs = ", length(pairs))
         println(io, "alpha_steps = ", STEP_SET)
         println(io, "max_passes = ", MAX_PASSES)
@@ -640,6 +753,17 @@ function main()
         println(io, "  v_full_pd = ", base_res.v_full_pd)
         println(io, "  exact_residual_zero = ", base_exact.all_zero, " (max |numerator| = ", base_exact.max_num, ")")
         println(io)
+        if !isnothing(proj_info)
+            println(io, "projected start (from target x):")
+            println(io, "  fit_err = ", proj_info.fit_err)
+            println(io, "  roundtrip_err = ", proj_info.roundtrip_err)
+            println(io, "  status = ", start_res.status)
+            println(io, "  max_real = ", start_res.max_real)
+            println(io, "  max_imag = ", start_res.max_imag)
+            println(io, "  v_full_pd = ", start_res.v_full_pd)
+            println(io, "  exact_residual_zero = ", start_exact.all_zero, " (max |numerator| = ", start_exact.max_num, ")")
+            println(io)
+        end
         println(io, "best accepted solution:")
         println(io, "  status = ", final_res.status)
         println(io, "  strict_hard = ", final_res.strict_hard)
