@@ -56,7 +56,10 @@ export SBP8_RATIONAL_TOLS="${SBP8_RATIONAL_TOLS:-1e-8,1e-9,1e-10,1e-7,1e-6}"
   echo "sbp8_rational_tols=${SBP8_RATIONAL_TOLS}"
 } | tee "${RUN_ROOT}/logs/meta.txt"
 
-"${JULIA_BIN}" --startup-file=no --project=. scripts/sbp8_exact_subspace_opt.jl \
+"${JULIA_BIN}" --startup-file=no --project=. -e 'using Pkg; Pkg.instantiate()' \
   | tee "${RUN_ROOT}/logs/run.log"
+
+"${JULIA_BIN}" --startup-file=no --project=. scripts/sbp8_exact_subspace_opt.jl \
+  | tee -a "${RUN_ROOT}/logs/run.log"
 
 echo "end_time=$(date -Is)" | tee -a "${RUN_ROOT}/logs/meta.txt"
