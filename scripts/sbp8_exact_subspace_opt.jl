@@ -69,6 +69,7 @@ const OPT_MAX_ITERS = parse(Int, get(ENV, "SBP8_OPT_MAX_ITERS", "2000"))
 const OPT_PENALTY_IMAG = parse(Float64, get(ENV, "SBP8_OPT_PENALTY_IMAG", "1000.0"))
 const TARGET_MAX_REAL = parse(Float64, get(ENV, "SBP8_TARGET_MAX_REAL", "-1e-8"))
 const FLOAT_IMAG_TOL = parse(Float64, get(ENV, "SBP8_FLOAT_IMAG_TOL", "1e-12"))
+const EVAL_ALPHA_TOL = parse(Float64, get(ENV, "SBP8_EVAL_ALPHA_TOL", "1e-8"))
 const RATIONAL_TOLS = parse_f64_csv("SBP8_RATIONAL_TOLS", "1e-8,1e-9,1e-10,1e-7,1e-6")
 
 const RESULTS_DIR = get(ENV, "SBP8_RESULTS_DIR", "data/sbp8_server_search_2026-03-08")
@@ -557,6 +558,43 @@ function evaluate_x_rational(problem, x::Vector{Rational{BigInt}})
     )
 end
 
+function evaluate_alpha_for_opt(
+    problem,
+    xp::Vector{Rational{BigInt}},
+    Nbasis::Matrix{Rational{BigInt}},
+    alpha::Vector{Float64},
+)
+    alpha_q = Rational{BigInt}[rationalize_big(a, EVAL_ALPHA_TOL) for a in alpha]
+    x_q = compose_x(xp, Nbasis, alpha_q)
+    res = evaluate_x_rational(problem, x_q)
+    obj = if res.status == "ok" && res.v_full_pd
+        res.max_real + OPT_PENALTY_IMAG * res.max_imag
+    else
+        Inf
+    end
+    reason = if res.status != "ok"
+        res.reason
+    elseif !res.v_full_pd
+        "v_not_pd"
+    else
+        ""
+    end
+    return (
+        status=res.status,
+        reason=reason,
+        obj=obj,
+        rho=res.rho,
+        max_real=res.max_real,
+        max_imag=res.max_imag,
+        cond_D=res.cond_D,
+        cond_G=res.cond_G,
+        cond_L=res.cond_L,
+        min_s=res.min_s,
+        s11=res.s11,
+        v_full_pd=res.v_full_pd,
+    )
+end
+
 function build_matrices(problem, x::Vector{Rational{BigInt}})
     idx = problem.idx
     N = problem.N
@@ -625,14 +663,11 @@ end
 
 function run_subspace_opt(problem, xp, Nbasis, alpha_start::Vector{Float64}, trace_path::String)
     method = OPT_METHOD == "neldermead" ? NelderMead() : error("Unsupported SBP8_OPT_METHOD='$OPT_METHOD'. Use 'neldermead'.")
-
-    xpf = Float64.(xp)
-    Nf = Matrix{Float64}(Nbasis)
-    nfree = size(Nf, 2)
+    nfree = size(Nbasis, 2)
     length(alpha_start) == nfree || error("alpha_start length mismatch: $(length(alpha_start)) != $nfree")
 
     best_alpha = copy(alpha_start)
-    best_res = evaluate_x_float(problem, xpf .+ Nf * alpha_start)
+    best_res = evaluate_alpha_for_opt(problem, xp, Nbasis, alpha_start)
     best_obj = best_res.obj
     eval_count = Ref(0)
 
@@ -640,8 +675,7 @@ function run_subspace_opt(problem, xp, Nbasis, alpha_start::Vector{Float64}, tra
     println(trace_io, "eval\tobj\tmax_real\tmax_imag\tv_full_pd\tstatus\treason")
 
     function objfun(alpha::Vector{Float64})
-        xtrial = xpf .+ Nf * alpha
-        res = evaluate_x_float(problem, xtrial)
+        res = evaluate_alpha_for_opt(problem, xp, Nbasis, alpha)
         eval_count[] += 1
 
         if res.obj < best_obj
@@ -765,9 +799,7 @@ function main()
         alpha_start_source = "zeros"
     end
 
-    Nf = Matrix{Float64}(Nbasis)
-    xpf = Float64.(xp)
-    start_float_res = evaluate_x_float(problem, xpf .+ Nf * alpha_start)
+    start_float_res = evaluate_alpha_for_opt(problem, xp, Nbasis, alpha_start)
     if !isfinite(start_float_res.obj) &&
        alpha_start_source == "alpha_file" &&
        USE_TARGET_PROJECTION &&
@@ -775,10 +807,10 @@ function main()
         x_target = load_x_vector(TARGET_X_FILE)
         alpha_start, proj_fit_err = project_target_alpha_float(xp, Nbasis, x_target)
         alpha_start_source = "projected_target_x_fallback"
-        start_float_res = evaluate_x_float(problem, xpf .+ Nf * alpha_start)
+        start_float_res = evaluate_alpha_for_opt(problem, xp, Nbasis, alpha_start)
     end
     isfinite(start_float_res.obj) || error(
-        "Invalid optimization start (obj=Inf). status=$(start_float_res.status), source=$alpha_start_source",
+        "Invalid optimization start (obj=Inf). status=$(start_float_res.status), reason=$(start_float_res.reason), source=$alpha_start_source",
     )
 
     opt = run_subspace_opt(problem, xp, Nbasis, alpha_start, trace_path)
@@ -849,6 +881,7 @@ function main()
         println(io, "opt_method = ", OPT_METHOD)
         println(io, "opt_max_iters = ", OPT_MAX_ITERS)
         println(io, "opt_penalty_imag = ", OPT_PENALTY_IMAG)
+        println(io, "eval_alpha_tol = ", EVAL_ALPHA_TOL)
         println(io, "target_max_real = ", TARGET_MAX_REAL)
         println(io, "float_imag_tol = ", FLOAT_IMAG_TOL)
         println(io, "rational_tols = ", RATIONAL_TOLS)
