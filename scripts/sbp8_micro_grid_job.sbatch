@@ -19,7 +19,7 @@ export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-1}"
 
 export SBP8_RESULTS_DIR="${RUN_ROOT}/results"
 export SBP8_OUT_BASENAME="${SBP8_OUT_BASENAME:-sbp8_exact_subspace_microgrid}"
-export SBP8_PAIR_FILE="${SBP8_PAIR_FILE:-remote_results/sbp8_vsearch_2026-03-07/distill_dense_20260307_194005/main/results/sbp8_distill_dense_pairs_gt_thresh.tsv}"
+export SBP8_PAIR_FILE="${SBP8_PAIR_FILE:-remote_results/sbp8_vsearch_2026-03-08/subspace_opt/subspace_408931/results/sbp8_exact_subspace_opt_pairs.jl}"
 # Use the best alpha coordinates from the previous 408931 Nelder-Mead run as the anchor
 export SBP8_ALPHA0_FILE="${SBP8_ALPHA0_FILE:-remote_results/sbp8_vsearch_2026-03-08/subspace_opt/subspace_408931/results/sbp8_exact_subspace_opt_alpha_float.tsv}"
 export SBP8_REQUIRE_ALPHA0_FILE="true"
