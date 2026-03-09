@@ -63,7 +63,7 @@ const TARGET_X_FILE = get(
     "SBP8_TARGET_X_FILE",
     "remote_results/sbp8_vsearch_2026-03-07/distill_dense_20260307_194005/main/results/sbp8_distill_dense_reduced_best_x.tsv",
 )
-const USE_TARGET_PROJECTION = parse_bool("SBP8_USE_TARGET_PROJECTION", "true")
+const USE_TARGET_PROJECTION = parse_bool("SBP8_USE_TARGET_PROJECTION", "false")
 const ALPHA_PROJ_TOL = parse(Float64, get(ENV, "SBP8_ALPHA_PROJ_TOL", "1e-8"))
 
 const OPT_METHOD = lowercase(strip(get(ENV, "SBP8_OPT_METHOD", "neldermead")))
