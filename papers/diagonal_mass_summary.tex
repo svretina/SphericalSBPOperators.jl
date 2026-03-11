@@ -1,0 +1,88 @@
+\documentclass[reprint,amsmath,amssymb,aps]{revtex4-2}
+
+\begin{document}
+
+\title{Summary of Spherical SBP Operators Construction (Diagonal Mass)}
+\author{Antigravity}
+\date{\today}
+
+\begin{abstract}
+This document summarizes the rigorous construction of spherically symmetric Summation-By-Parts (SBP) operators with diagonal mass matrices. It details the ansatz for mass matrices and derivative operators, the special treatment of the origin, and the logic and accuracy constraints underlying the modification of the gradient block near the boundary.
+\end{abstract}
+
+\maketitle
+
+\section{Ansatz for Mass Matrices}
+Our construction seeks spherical SBP operators defined on a non-negative half-grid radial domain $r \in [0, R]$ starting from a baseline Cartesian SBP operator defined on the full domain $x \in [-R, R]$ with a strictly diagonal norm matrix $H_{\text{full}}$.
+
+For spherical coordinates with metric factor $r^p$ (e.g., $p=2$ for 3D spheres), the mass matrices $S$ (for even/scalar fields) and $V$ (for odd/vector fields) are constructed entirely as diagonal matrices. Specifically, they are formed by folding the underlying Cartesian norm and weighting by the local metric:
+\begin{equation}
+    S = V = \frac{1}{2} E_{\text{even}}^T H_{\text{full}} E_{\text{even}} \operatorname{diag}(r^p)
+\end{equation}
+where $E_{\text{even}}$ is the even parity extension matrix from the half-grid to the full grid. This guarantees exactly diagonal spherical norms. 
+The boundary operator $B$ is a matrix of all zeros except for the last element on the diagonal:
+\begin{equation}
+    B_{N,N} = r_N^p
+\end{equation}
+where $r_N = R$ is the outer boundary point.
+
+\section{Ansatz for Derivative Operators}
+Initial derivative operators are constructed through symmetry-preserving projections (folding) of the base Cartesian derivative matrix $G_{\text{full}}$:
+\begin{align}
+    G_{\text{even}} &= R_{\text{op}} G_{\text{full}} E_{\text{even}} \\
+    G_{\text{odd}} &= R_{\text{op}} G_{\text{full}} E_{\text{odd}}
+\end{align}
+where $R_{\text{op}}$ is the restriction matrix from the full domain onto the half-grid $r \ge 0$, and $E_{\text{odd}}$ is the odd parity extension operator.
+
+The divergence operator $D$ acts on odd radial vector fields. For all rows except the origin ($i \ge 2$), it is completely determined by the discrete SBP property:
+\begin{equation}
+    S D = B - G_{\text{even}}^T V \quad \implies \quad D = S^{-1} (B - G_{\text{even}}^T V).
+\end{equation}
+Because $S$ is strictly diagonal, this algebraic relationship computes the exact matrix $D$ row-by-row for the interior and outer boundary points.
+
+\section{The Origin (First Row)}
+At the exact origin $r=0$ (the first row $i=1$), the divergence expression $\nabla \cdot (u \hat{r}) = \partial_r u + \frac{p}{r} u$ is singular. Taking the limit $r \to 0$ and applying L'H\^opital's rule, we obtain the exact analytic condition:
+\begin{equation}
+    (\nabla \cdot u)\big|_{r=0} = (p + 1) \partial_r u\big|_{r=0}
+\end{equation}
+We reflect this exact continuum limit directly in the discrete divergence operator by setting the first row of $D$ proportionally to the first row of the odd derivative operator $G_{\text{odd}}$:
+\begin{equation}
+    D_{1, j} = (p+1) (G_{\text{odd}})_{1,j} \quad \forall j
+\end{equation}
+
+\section{Fixing the Gradient Rows near the Origin}
+When $G_{\text{even}}$ is initially constructed via folding, its first column (which acts on the origin value $\phi(0)$) will contain non-zero entries for a block of rows near the center. To completely decouple the evaluation from the boundary values at exactly $r=0$ (especially crucial for non-staggered grids where avoiding artificial numerical coupling to the origin point simplifies stability and implementations), we forcibly zero out this first column block and recalculate those rows.
+
+\subsection{How Many Rows Do We Fix?}
+The number of rows modified corresponds exactly to the set of rows in the initially folded $G_{\text{even}}$ that have a non-zero element in the first column:
+\begin{equation}
+    \mathcal{I}_{\text{solve}} = \{ i \ge 2 \mid (G_{\text{even}})_{i,1} \neq 0 \}
+\end{equation}
+This logic directly ties the size of the repaired block to the Cartesian oper   ator's half-bandwidth. Thus, it intrinsically adapts to the stencil width of the underlying SBP finite difference scheme. It modifies exactly those nodes that would have otherwise reached across into $r=0$.
+
+\subsection{Imposed Accuracy Conditions}
+For each row $i \in \mathcal{I}_{\text{solve}}$, we reset $(G_{\text{even}})_{i,1} = 0$ and solve for new stencil weights on columns $j \in \mathcal{J}_{\text{stencil}}$ (which excludes $j=1$). 
+In order to guarantee that the modified $G_{\text{even}}$ and its downstream divergence operator $D$ provide appropriate convergence rates, we impose a highly coupled system of exact linear equations governed by two sets of accuracy constraints:
+
+\textbf{1. Even Monomial Gradient Constraints:} \\
+The modified rows must exactly differentiate even polynomials $\phi(r) = r^{2m}$ for $m = 0, 1, \dots, \tau_B$:
+\begin{equation} \label{eq:even_grad}
+    \sum_{j \in \mathcal{J}_{\text{stencil}}} (G_{\text{even}})_{i,j} r_j^{2m} = 
+    \left( 2m r^{2m-1} \right)\big|_{r_i} 
+    \quad - \!\!\!\sum_{j \notin \mathcal{J}_{\text{stencil}}, j \neq 1}\!\!\! (G_{\text{even}})_{i,j} r_j^{2m}
+\end{equation}
+where $\tau_B$ is the boundary accuracy order of the original Cartesian operator. 
+The analytic derivative is simply the first term on the right-hand side ($2m r_i^{2m-1}$). However, we are framing this as a linear system ($Ax=b$) to solve for the completely unknown weights in the subset $(G_{\text{even}})_{i,j}$ for $j \in \mathcal{J}_{\text{stencil}}$. Therefore, the contributions from the \textit{known, unchanged} weights of the operator (where $j \notin \mathcal{J}_{\text{stencil}}$) are subtracted from the analytic target to form the right-hand side `knowns` vector.
+
+\textbf{2. Odd Monomial Divergence Constraints:} \\
+Because $S D = B - G_{\text{even}}^T V$, altering $G_{\text{even}}$ near the origin inevitably changes the columns of $D$. We ensure that the resulting $D$ correctly evaluates the true divergence for odd polynomial vector fields $u(r) = r^d$ for degrees $d = 1, 3, \ldots, \tau_I - p$ (where $\tau_I$ is the interior Cartesian accuracy limit). For each modified row $i$, the SBP condition couples it globally:
+\begin{equation}
+    \sum_{j \in \mathcal{I}_{\text{solve}}} (G_{\text{even}})_{j,i} V_j r_j^d = B_{i,i} r_i^d - S_{i,i}(p+d) r_i^{d-1} - \text{fixed term}
+\end{equation}
+where the fixed term contains the known contributions from all unmodified operator entries:
+\begin{equation}
+    \text{fixed term} = \sum_{j \notin \mathcal{I}_{\text{solve}} \text{ or } i \notin \mathcal{J}_{\text{stencil}}} (G_{\text{even}})_{j,i} V_j r_j^d
+\end{equation}
+Similar to Equation~\ref{eq:even_grad}, the sum on the left contains only the unknown variables we are solving for, while the exact divergence ($S_{i,i}(p+d)r_i^{d-1}$) and the non-modified terms are shifted to the right-hand side. These sets of linear equations construct the exact rational SBP coupled block, ensuring strict conservation identities and design-order consistency over the repaired origin region.
+
+\end{document}

@@ -114,7 +114,8 @@ function _cartesian_half_bandwidth(Dfull)
     return bw
 end
 
-function _infer_boundary_accuracy_order(Gfull::SparseMatrixCSC{T, Ti},
+function _infer_boundary_accuracy_order(Dfull,
+                                        Gfull::SparseMatrixCSC{T, Ti},
                                         xfull::Vector{T},
                                         interior_accuracy::Int;
                                         atol::T) where {T <: Real, Ti <: Integer}
@@ -144,10 +145,24 @@ function _infer_boundary_accuracy_order(Gfull::SparseMatrixCSC{T, Ti},
         end
     end
 
-    boundary_accuracy >= 0 ||
-        throw(ArgumentError("Failed to infer boundary accuracy from the base Cartesian operator."))
+    if boundary_accuracy >= 0
+        return boundary_accuracy
+    end
 
-    return boundary_accuracy
+    # Fallback for diagonal-norm SBP families: boundary order is typically half
+    # the interior order. Read the interior order from operator coefficients when
+    # available, then apply the half-order rule.
+    if hasproperty(Dfull, :coefficients)
+        coeffs = getproperty(Dfull, :coefficients)
+        if hasproperty(coeffs, :accuracy_order)
+            q = Int(getproperty(coeffs, :accuracy_order))
+            q > 0 || throw(ArgumentError("Inferred non-positive interior accuracy order from coefficients: $q."))
+            return max(0, fld(q, 2))
+        end
+    end
+
+    interior_accuracy > 0 || throw(ArgumentError("Failed to infer boundary accuracy from both probing and metadata."))
+    return max(0, fld(interior_accuracy, 2))
 end
 
 @inline _num_even_constraints(boundary_accuracy::Int) = boundary_accuracy + 1
@@ -475,7 +490,7 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
     rows_to_solve = _rows_with_nonzero_first_column(Geven; atol = atol)
     cartesian_half_bandwidth = _cartesian_half_bandwidth(Dfull)
     interior_accuracy = _infer_interior_accuracy_order(Dfull)
-    boundary_accuracy = _infer_boundary_accuracy_order(Gfull, xfull, interior_accuracy; atol = atol)
+    boundary_accuracy = _infer_boundary_accuracy_order(Dfull, Gfull, xfull, interior_accuracy; atol = atol)
     num_constraints = _num_even_constraints(boundary_accuracy)
     requested_divergence_degrees = _divergence_constraint_degrees(interior_accuracy, p)
     divergence_degrees = copy(requested_divergence_degrees)
@@ -754,7 +769,7 @@ function scale_spherical_operators(ops::SphericalOperators,
 end
 
 """
-    spherical_operators(source; accuracy_order, N, R, p=2, mode=FastMode(),
+    spherical_operators(source; accuracy_order, N, R, p=2, mode=SafeMode(),
                         atol=nothing, snap_factor=64.0, build_matrix=:probe,
                         custom_stencil_cols=nothing, return_canonical=false,
                         target_eltype=nothing, mass_solver=:seed,
@@ -779,7 +794,7 @@ function spherical_operators(source;
                              N,
                              R,
                              p::Int = 2,
-                             mode = FastMode(),
+                             mode = SafeMode(),
                              atol = nothing,
                              snap_factor::Float64 = 64.0,
                              build_matrix::Symbol = :probe,

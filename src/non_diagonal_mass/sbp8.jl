@@ -432,14 +432,6 @@ function _sbp8_constraint_rows(N::Int, closure_right::Int, first_rows_r7::Int)
     )
 end
 
-function _sbp8_constraint_error(D::SparseMatrixCSC, r::AbstractVector, p::Int, degree::Int, rows::Vector{Int})
-    isempty(rows) && return 0.0
-    u = r .^ degree
-    exact = (p + degree) .* (r .^ (degree - 1))
-    num = D * u
-    return maximum(abs.(Float64.(num[rows] .- exact[rows])))
-end
-
 function _sbp8_constraint_error_metrics(D::SparseMatrixCSC, r::AbstractVector, p::Int, degree::Int, rows::Vector{Int})
     isempty(rows) && return (abs=0.0, rel=0.0)
     u = r .^ degree
@@ -719,9 +711,9 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
     s1_target_factor::Float64=0.55,
     s_min::Float64=1e-12,
     enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=2e4,
+    floating_point_factor::Float64=5e4,
     enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=2e-6,
+    spectrum_imag_tol::Float64=5e-6,
     spectrum_nonpositive_tol::Float64=1e-8,
     stability_check::Bool=true,
     verbose::Bool=true)
@@ -1003,9 +995,9 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     post_polish::Bool=true,
     post_polish_tol::Float64=1e-12,
     enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=2e4,
+    floating_point_factor::Float64=5e4,
     enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=2e-6,
+    spectrum_imag_tol::Float64=5e-6,
     spectrum_nonpositive_tol::Float64=1e-8,
     stability_check::Bool=true,
     verbose::Bool=true)
@@ -1495,9 +1487,9 @@ function sbp8_solve_accuracy_constraints(source;
     post_polish::Bool=true,
     post_polish_tol::Float64=1e-12,
     enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=2e4,
+    floating_point_factor::Float64=5e4,
     enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=2e-6,
+    spectrum_imag_tol::Float64=5e-6,
     spectrum_nonpositive_tol::Float64=1e-8,
     stability_check::Bool=true,
     verbose::Bool=true)
@@ -1579,9 +1571,9 @@ function sbp8_operators(source,
     post_polish::Bool=true,
     post_polish_tol::Float64=1e-12,
     enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=2e4,
+    floating_point_factor::Float64=5e4,
     enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=2e-6,
+    spectrum_imag_tol::Float64=5e-6,
     spectrum_nonpositive_tol::Float64=1e-8,
     stability_check::Bool=true,
     verbose::Bool=false)

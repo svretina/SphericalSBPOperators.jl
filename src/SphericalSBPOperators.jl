@@ -2,13 +2,14 @@ module SphericalSBPOperators
 
 using LinearAlgebra: dot, eigen, mul!, norm
 import LinearAlgebra
+using CairoMakie
+using LaTeXStrings
 using LinearSolve: KLUFactorization
 using OrdinaryDiffEqLowOrderRK: RK4
 using OrdinaryDiffEqSDIRK: ImplicitMidpoint
 using SciMLBase: DiscreteCallback, ODEFunction, ODEProblem, remake, solve
 using SparseArrays: SparseMatrixCSC, dropzeros!, findnz, sparse, spdiagm, spzeros
 using SummationByPartsOperators:
-    FastMode,
     SafeMode,
     MattssonNordström2004,
     derivative_operator,
@@ -51,6 +52,11 @@ export diagnose_reflecting_energy_bump
 export diagnose_reflecting_sat_energy_drift
 export energy_rate
 export WaveODEParams
+export save_spectrum_plot, save_nullspace_plot
+export save_reflection_heatmap, save_energy_trace
+export save_dashboard, save_reflection_animation
+export laplacian_matrix, laplacian_spectrum, save_laplacian_spectrum_plot
+export save_laplacian_spectrum_sources_plot
 
 include("diagonal_mass/types.jl")
 include("diagonal_mass/snap.jl")
@@ -64,6 +70,8 @@ include("diagonal_mass/validation.jl")
 include("diagonal_mass/diagnostics.jl")
 include("diagonal_mass/wave_physics.jl")
 include("diagonal_mass/wave_solver.jl")
+include("plots/stability_plots.jl")
+include("plots/spectrum_plots.jl")
 
 """
     SphericalSBPOperators

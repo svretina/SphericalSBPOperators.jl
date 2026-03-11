@@ -312,16 +312,6 @@ function _sbp6_as_big_rational(x::Real)
     throw(ArgumentError("Could not convert value of type $(typeof(x)) to Rational{BigInt}."))
 end
 
-function _sbp6_sparse_convert(A::SparseMatrixCSC{Ta,Ti}, ::Type{Tb}) where {Ta<:Real,Ti<:Integer,Tb<:Real}
-    n, m = size(A)
-    I, J, V = findnz(A)
-    W = Vector{Tb}(undef, length(V))
-    @inbounds for k in eachindex(V)
-        W[k] = convert(Tb, V[k])
-    end
-    return sparse(I, J, W, n, m)
-end
-
 function _sbp6_maxabs(values)
     isempty(values) && return zero(eltype(values))
     m = zero(eltype(values))
