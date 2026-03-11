@@ -432,14 +432,6 @@ function _sbp8_constraint_rows(N::Int, closure_right::Int, first_rows_r7::Int)
     )
 end
 
-function _sbp8_constraint_error(D::SparseMatrixCSC, r::AbstractVector, p::Int, degree::Int, rows::Vector{Int})
-    isempty(rows) && return 0.0
-    u = r .^ degree
-    exact = (p + degree) .* (r .^ (degree - 1))
-    num = D * u
-    return maximum(abs.(Float64.(num[rows] .- exact[rows])))
-end
-
 function _sbp8_constraint_error_metrics(D::SparseMatrixCSC, r::AbstractVector, p::Int, degree::Int, rows::Vector{Int})
     isempty(rows) && return (abs=0.0, rel=0.0)
     u = r .^ degree
