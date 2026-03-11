@@ -1,6 +1,5 @@
 function _assert_origin(r::Vector{T}, atol::T) where {T <: Real}
-    isempty(r) &&
-        throw(ArgumentError("Half-grid is empty; could not locate nonnegative nodes."))
+    isempty(r) && throw(ArgumentError("Half-grid is empty; could not locate nonnegative nodes."))
     if T <: AbstractFloat
         abs(r[1]) <= atol ||
             throw(ArgumentError("Could not identify origin node: |r[1]| = $(abs(r[1])) > atol = $atol."))
@@ -25,10 +24,7 @@ function _build_half_lookup(r::Vector{T}, ::T) where {T <: Real}
     return Dict{T, Int}(rj => j for (j, rj) in enumerate(r))
 end
 
-function _lookup_half_index(absx::T, lookup::NamedTuple, r::Vector{T}) where {
-        T <:
-        AbstractFloat,
-    }
+function _lookup_half_index(absx::T, lookup::NamedTuple, r::Vector{T}) where {T <: AbstractFloat}
     key = round(Int, absx / lookup.pair_tol)
     for dk in -2:2
         j = get(lookup.key_to_index, key + dk, 0)
@@ -47,10 +43,11 @@ end
 
 function _build_folding_operators(xfull::Vector{T}; atol::T) where {T <: Real}
     M = length(xfull)
-    sorted_full_idx = sortperm(xfull)
-    half_indices = [i for i in sorted_full_idx if xfull[i] >= -atol]
-    isempty(half_indices) &&
-        throw(ArgumentError("No half-grid nodes found with x >= -atol."))
+    half_indices = sort(
+                        [i for i in eachindex(xfull) if xfull[i] >= -atol];
+                        by = i -> xfull[i]
+                       )
+    isempty(half_indices) && throw(ArgumentError("No half-grid nodes found with x >= -atol."))
 
     r = xfull[half_indices]
     _assert_origin(r, atol)
@@ -93,3 +90,4 @@ function _build_folding_operators(xfull::Vector{T}; atol::T) where {T <: Real}
 
     return r, Rop, Eeven, Eodd
 end
+

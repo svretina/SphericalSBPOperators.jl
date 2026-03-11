@@ -1,6 +1,7 @@
 module SphericalSBPOperators
 
 using LinearAlgebra: dot, eigen, mul!, norm
+import LinearAlgebra
 using LinearSolve: KLUFactorization
 using OrdinaryDiffEqLowOrderRK: RK4
 using OrdinaryDiffEqSDIRK: ImplicitMidpoint
@@ -8,6 +9,7 @@ using SciMLBase: DiscreteCallback, ODEFunction, ODEProblem, remake, solve
 using SparseArrays: SparseMatrixCSC, dropzeros!, findnz, sparse, spdiagm, spzeros
 using SummationByPartsOperators:
     FastMode,
+    SafeMode,
     MattssonNordström2004,
     derivative_operator,
     grid,
@@ -22,12 +24,20 @@ export apply_even_gradient, apply_odd_derivative, apply_divergence
 export enforce_odd!, check_odd
 export compute_even_gradient_row_decoupled, verify_even_gradient_row_decoupled
 export snap_sparse!
+export sbp4_v_offdiag_pairs, sbp4_vector_mass, sbp4_scalar_mass_gradient
+export sbp4_construct_divergence, sbp4_solve_accuracy_constraints
+export sbp4_operators
+export sbp6_v_offdiag_pairs, sbp6_vector_mass, sbp6_scalar_mass_gradient
+export sbp6_construct_divergence, sbp6_solve_accuracy_constraints
+export sbp6_operators
+export sbp8_v_offdiag_pairs, sbp8_vector_mass, sbp8_scalar_mass_gradient
+export sbp8_construct_divergence, sbp8_solve_accuracy_constraints
+export sbp8_operators
 export default_wave_profile
 export bumpb, bumpb_profile
 export characteristic_initial_data
 export apply_symmetry_state!, apply_symmetry_rhs!, initialize_wave_state!
-export apply_characteristic_bc_sat!, boundary_characteristics,
-    boundary_characteristic_residual
+export apply_characteristic_bc_sat!, boundary_characteristics, boundary_characteristic_residual
 export apply_symmetry_constraints!, apply_boundary_conditions!, apply_wave_constraints!
 export check_wave_data_consistency
 export check_potential_consistency
@@ -41,23 +51,19 @@ export diagnose_reflecting_energy_bump
 export diagnose_reflecting_sat_energy_drift
 export energy_rate
 export WaveODEParams
-export Staggered
-export staggered_spherical_operators
-export scale_staggered_spherical_operators
-export validate_staggered
-export diagnose_staggered
-export interpret_staggered_diagnostics
 
-include("snap.jl")
-include("collocated/types.jl")
-include("collocated/fullgrid.jl")
-include("collocated/folding.jl")
-include("collocated/construct.jl")
-include("collocated/validation.jl")
-include("collocated/diagnostics.jl")
-include("staggered/Staggered.jl")
-include("wave/Wave.jl")
-include("Plots/Plots.jl")
+include("diagonal_mass/types.jl")
+include("diagonal_mass/snap.jl")
+include("diagonal_mass/fullgrid.jl")
+include("diagonal_mass/folding.jl")
+include("non_diagonal_mass/sbp4.jl")
+include("non_diagonal_mass/sbp6.jl")
+include("non_diagonal_mass/sbp8.jl")
+include("diagonal_mass/construct.jl")
+include("diagonal_mass/validation.jl")
+include("diagonal_mass/diagnostics.jl")
+include("diagonal_mass/wave_physics.jl")
+include("diagonal_mass/wave_solver.jl")
 
 """
     SphericalSBPOperators
@@ -73,16 +79,17 @@ Accordingly:
 - `Geven` maps even fields to odd derivatives;
 - `D` maps odd radial fluxes to even divergence values.
 
-The metric-weighted SBP mass is
+The metric-weighted SBP masses are
 ```math
-H = H_{\\mathrm{cart,half}}\\,\\mathrm{diag}(r^p),
+S = H_{\\mathrm{cart,half}}\\,\\mathrm{diag}(r^p), \\qquad
+V = H_{\\mathrm{cart,half}}\\,\\mathrm{diag}(r^p),
 ```
 and the discrete SBP relation is
 ```math
-H D + G^T H = B, \\quad B = \\mathrm{diag}(0,\\dots,0,R^p).
+S D + G^T V = B, \\quad B = \\mathrm{diag}(0,\\dots,0,R^p).
 ```
 
-For `p > 0`, `H[1,1] = 0` at `r = 0`, so SBP does not constrain the origin row of
+For `p > 0`, `S[1,1] = 0` (and likewise `V[1,1] = 0`) at `r = 0`, so SBP does not constrain the origin row of
 `D`. This row is fixed using the removable-singularity condition for odd fluxes:
 ```math
 (Du)(0) = (p+1)u'(0),
@@ -96,17 +103,5 @@ Rational arithmetic is supported through type inference from inputs (e.g. `R = 1
 matching `SummationByPartsOperators`.
 """
 SphericalSBPOperators
-
-const StaggeredSphericalOperators = Staggered.SphericalOperators
-
-@inline staggered_spherical_operators(args...; kwargs...) = Staggered.spherical_operators(args...; kwargs...)
-@inline scale_staggered_spherical_operators(
-    args...; kwargs...
-) = Staggered.scale_spherical_operators(args...; kwargs...)
-@inline validate_staggered(args...; kwargs...) = Staggered.validate(args...; kwargs...)
-@inline diagnose_staggered(args...; kwargs...) = Staggered.diagnose(args...; kwargs...)
-@inline interpret_staggered_diagnostics(
-    args...; kwargs...
-) = Staggered.interpret_diagnostics(args...; kwargs...)
 
 end

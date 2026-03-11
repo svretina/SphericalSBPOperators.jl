@@ -1,0 +1,238 @@
+\documentclass[
+  aps,
+  pre,
+  reprint,
+  superscriptaddress,
+  nofootinbib
+]{revtex4-2}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsfonts,bm,mathtools}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\diag}{\operatorname{diag}}
+
+\begin{document}
+
+\title{Diagonal Split-Mass SBP Construction by Constrained Optimization}
+
+\author{SphericalSBPOperators Development Team}
+\affiliation{Computational Science and Engineering}
+
+\date{\today}
+
+\begin{abstract}
+We document a diagonal split-mass construction for spherical-symmetry SBP operators in which
+scalar and vector moments are integrated by separate diagonal matrices. The method enforces
+hard positivity of both diagonal masses and imposes symmetry, divergence, and quadrature
+conditions as linear equality constraints in a constrained optimization problem. We describe
+both full-constraint and divergence-first staged variants, then summarize feasibility and
+constraint errors for representative runs at $p=2$ and gradient orders $d=2,4,6$.
+Feasible configurations satisfy the discrete SBP identity at roundoff level.
+\end{abstract}
+
+\maketitle
+
+\section{Problem statement}
+On a mirrored uniform grid $x_i\in[-R,R]$ ($i=1,\dots,N$), let $G\in\R^{N\times N}$ be a
+first-derivative SBP matrix and
+\begin{equation}
+B = \diag(B_{11},\dots,B_{NN}),\qquad
+B_{11}=-R^p,\quad B_{NN}=R^p,
+\end{equation}
+with all other $B_{ii}=0$.
+
+We seek two diagonal positive-definite mass matrices
+\begin{equation}
+S=\diag(s_1,\dots,s_N),\qquad V=\diag(v_1,\dots,v_N),
+\end{equation}
+with
+\begin{equation}
+s_i\ge \epsilon,\qquad v_i\ge \epsilon\quad \forall i,
+\end{equation}
+where $\epsilon>0$ is user-selected (default in the implementation is the next-cell volume from
+$r=0$, i.e. $\epsilon=1/3$ for $\Delta r=1$).
+
+The split SBP relation is
+\begin{equation}
+S D + G^T V = B,
+\label{eq:split_sbp}
+\end{equation}
+which defines
+\begin{equation}
+D = S^{-1}(B-G^TV).
+\label{eq:D_from_SV}
+\end{equation}
+
+\section{Constraint families}
+Unknowns are collected as
+\begin{equation}
+z = [s_1,\dots,s_N,v_1,\dots,v_N]^T \in \R^{2N}.
+\end{equation}
+All imposed conditions are linear in $z$.
+
+\subsection{Reflection symmetry}
+Let $c=(N+1)/2$ be the center index. For $k=1,\dots,c-1$:
+\begin{align}
+s_{c-k}-s_{c+k}&=0,\\
+v_{c-k}-v_{c+k}&=0.
+\end{align}
+
+\subsection{Optional anti-stiffness}
+If enabled:
+\begin{equation}
+s_c-s_{c+1}=0,\qquad v_c-v_{c+1}=0.
+\end{equation}
+
+\subsection{Split quadrature moments}
+For geometry power $p$, the target moment is
+\begin{equation}
+I_q = \int_{-R}^{R} r^{q}r^p\,dr.
+\end{equation}
+
+For even exponents $q\in\{0,2,\dots,q_S^{\max}\}$:
+\begin{equation}
+\sum_{j=1}^N s_j x_j^q = I_q.
+\end{equation}
+
+For odd exponents $q\in\{1,3,\dots,q_V^{\max}\}$:
+\begin{equation}
+\sum_{j=1}^N v_j x_j^q = I_q.
+\end{equation}
+
+Optionally, a $q=-1$ vector moment is also enforced:
+\begin{equation}
+\sum_{j=1}^N v_j \phi_j^{(-1)} = I_{-1},
+\end{equation}
+where $\phi_j^{(-1)}=1/x_j$ for $x_j\neq0$ and $\phi_j^{(-1)}=0$ at $x_j=0$.
+
+\subsection{Divergence exactness on odd monomials}
+For odd $k$, Eq.~\eqref{eq:split_sbp} applied to $x^k$ gives row-wise constraints:
+\begin{equation}
+(k+p)x_i^{k-1}s_i + \sum_{j=1}^N G_{ji}x_j^k v_j = B_{ii}x_i^k.
+\label{eq:div_constraint_row}
+\end{equation}
+
+Interior rows use odd degrees up to $k\le k_{\text{int}}^{\max}$
+(via \texttt{div\_max\_odd}). Boundary rows use a possibly reduced cap
+$k\le k_{\text{bnd}}^{\max}$ (via \texttt{boundary\_div\_max\_odd}).
+
+\section{Optimization model}
+With active equality rows $A_{\text{act}}z=b_{\text{act}}$, we solve
+\begin{align}
+\min_{z\in\R^{2N}}\;& \sum_{i=1}^N (s_i-|x_i|^p)^2 + \sum_{i=1}^N (v_i-|x_i|^p)^2,\\
+\text{s.t. }\;& A_{\text{act}}z=b_{\text{act}},\\
+& s_i\ge\epsilon,\;v_i\ge\epsilon.
+\end{align}
+Ipopt is used with tight feasibility tolerances.
+
+\paragraph{Feasibility criterion.}
+A run is marked feasible if termination is successful and
+\begin{equation}
+\max |A_{\text{act}}z-b_{\text{act}}| \le \tau,
+\end{equation}
+with $\tau=\max(10^{-9},10\,\texttt{constr\_viol\_tol})$.
+
+\section{Constraint application strategies}
+Two modes are implemented.
+
+\subsection{Full mode}
+All selected constraints are active simultaneously.
+
+\subsection{Staged quadrature mode}
+First, solve with symmetry+divergence rows only.
+Then attempt quadrature rows one-by-one (ordered by exponent and family), retaining only rows that
+preserve feasibility under positivity bounds.
+
+This mode prioritizes divergence constraints when full systems are difficult.
+
+\section{Run design choices}
+All reported runs use:
+\begin{itemize}
+  \item geometry $p=2$,
+  \item mirrored grid $x=-10:1:10$ ($N=21$),
+  \item odd divergence monomials in the interior according to each test,
+  \item hard positivity for both masses ($S,V\succeq \epsilon I$ in diagonal form).
+\end{itemize}
+
+For $d=2,4$, we tested representative split quadrature settings and observed feasible solves with
+small residuals.
+For $d=6$, we focused on the case requested by the study:
+interior $\{D r, D r^3\}$ and reduced boundary divergence order.
+
+\section{Summary of feasible runs}
+Table~\ref{tab:feasible_summary} reports feasible representative runs.
+The quadrature columns show maximum absolute per-moment errors over imposed moments.
+The divergence columns report maximum residual of imposed divergence constraints, plus
+origin and boundary subsets.
+
+\begin{table*}[t]
+\centering
+\caption{Feasible representative runs for diagonal split masses.}
+\label{tab:feasible_summary}
+\begin{tabular}{@{}llllllllll@{}}
+\toprule
+Case & $d$ & $\epsilon$ & $k_{\text{bnd}}^{\max}$ & Quadrature set & $\max|A z-b|$ & $\max E_S$ & $\max E_V$ & $\max E_{\text{div}}$ & $(E_{\text{div}}(0),E_{\text{div}}(\partial))$ \\
+\midrule
+A & 2 & $1/3$ & 1 & $S:\{0,2\},\;V:\{-1,1,3\}$ & $1.46\times 10^{-11}$ & $2.27\times 10^{-13}$ & $1.46\times 10^{-11}$ & $1.14\times 10^{-13}$ & (n/a, $1.14\times 10^{-13}$) \\
+B & 4 & $1/3$ & 1 & $S:\{0,2\},\;V:\{-1,1,3\}$ & $2.91\times 10^{-11}$ & $1.14\times 10^{-13}$ & $2.18\times 10^{-11}$ & $1.22\times 10^{-13}$ & ($1.22\times 10^{-13}$, $1.14\times 10^{-13}$) \\
+C & 6 & $10^{-2}$ & 1 & $S:\{0,2\},\;V:\{-1,1,3\}$ & $1.46\times 10^{-11}$ & $0$ & $7.28\times 10^{-12}$ & $4.55\times 10^{-13}$ & ($2.72\times 10^{-13}$, $2.27\times 10^{-13}$) \\
+D & 6 & $10^{-3}$ & 1 & $S:\{0,2\},\;V:\{-1,1,3\}$ & $1.46\times 10^{-11}$ & $0$ & $1.09\times 10^{-11}$ & $3.04\times 10^{-13}$ & ($3.04\times 10^{-13}$, $7.11\times 10^{-14}$) \\
+E & 6 & $10^{-2}$ & 0 & $S:\{0,2\},\;V:\{-1,1,3\}$ & $1.42\times 10^{-13}$ & $0$ & $0$ & $1.42\times 10^{-13}$ & ($5.55\times 10^{-17}$, n/a) \\
+F & 6 & $10^{-3}$ & 0 & $S:\{0,2\},\;V:\{-1,1,3\}$ & $7.28\times 10^{-12}$ & $2.27\times 10^{-13}$ & $2.91\times 10^{-11}$ & $2.84\times 10^{-13}$ & ($1.67\times 10^{-16}$, n/a) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{SBP residual on feasible runs.}
+For feasible cases, the matrix residual
+\begin{equation}
+R_{\text{SBP}} = S D + G^T V - B
+\end{equation}
+is at roundoff level. For the $d=6$ feasible runs above, we observed
+$\max|R_{\text{SBP}}|\in[7.1\times10^{-15},2.8\times10^{-14}]$.
+
+\section{What caused infeasibility in difficult $d=6$ runs?}
+For $d=6$ with interior $\{D r,D r^3\}$ and boundary $D r$ under the default
+$\epsilon=1/3$, the divergence-first base system can be linearly consistent
+(so not a pure rank mismatch), but still incompatible with strict positivity.
+Lowering $\epsilon$ to $10^{-3}$ or $10^{-2}$ restores feasibility for the tested
+quadrature set.
+
+When boundary divergence is further tightened, genuine linear inconsistency
+(rank mismatch) can also appear.
+
+\section{Practical procedure}
+A practical workflow for diagonal split masses is:
+\begin{enumerate}
+  \item Choose $(d,p)$ and divergence targets first (interior and boundary separately).
+  \item Solve divergence+symmetry with hard positivity.
+  \item If feasible, add quadrature moments (full or staged mode).
+  \item Report per-family residuals and SBP matrix residual.
+\end{enumerate}
+
+\section{Reproducibility}
+All runs are produced with
+\texttt{scripts/diag\_mass\_qp/diag\_mass\_qp\_core.jl}
+and
+\texttt{scripts/diag\_mass\_qp/run\_diag\_mass\_qp.jl}.
+
+Example command (feasible $d=6$ case):
+\begin{verbatim}
+julia --project=. scripts/diag_mass_qp/run_diag_mass_qp.jl \
+  --p 2 --d 6 --epsilon 1e-3 \
+  --div-max-odd 3 --boundary-div-max-odd 1 \
+  --s-quad-order 2 --v-quad-order 3 --enforce-v-neg1
+\end{verbatim}
+
+\end{document}
