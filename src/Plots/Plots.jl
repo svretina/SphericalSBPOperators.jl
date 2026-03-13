@@ -1,7 +1,9 @@
 module Plots
 
 import DrWatson: plotsdir, savename
+import GenericSchur
 import MakiePublication: theme_aps
+import MultiFloats: Float64x4
 import OrdinaryDiffEqLowOrderRK: RK4
 import Printf: @printf, @sprintf
 import SciMLBase: ODEProblem, solve

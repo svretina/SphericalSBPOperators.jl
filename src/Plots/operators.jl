@@ -1,3 +1,37 @@
+@inline _plots_spectrum_as_big_rational(x::Rational{BigInt}) = x
+@inline _plots_spectrum_as_big_rational(x::Integer) = big(x) // 1
+@inline _plots_spectrum_as_big_rational(x::Rational{<:Integer}) = big(numerator(x)) // big(denominator(x))
+
+function _plots_spectrum_as_big_rational(x::AbstractFloat)
+    isfinite(x) || throw(ArgumentError("Cannot convert non-finite floating-point value `$x` to Rational{BigInt}."))
+    return rationalize(BigInt, BigFloat(x))
+end
+
+function _plots_spectrum_as_big_rational(x::Real)
+    throw(ArgumentError("Could not convert value of type $(typeof(x)) to Rational{BigInt}."))
+end
+
+function _plots_spectrum_float64x4_matrix(A::AbstractMatrix{<:Real})
+    m, n = size(A)
+    Aq = Matrix{Rational{BigInt}}(undef, m, n)
+    @inbounds for j in 1:n
+        for i in 1:m
+            Aq[i, j] = _plots_spectrum_as_big_rational(A[i, j])
+        end
+    end
+    return Matrix{Float64x4}(Aq)
+end
+
+function _plots_high_precision_schur_values(A::AbstractMatrix{<:Real})
+    Ahp = _plots_spectrum_float64x4_matrix(A)
+    return LinearAlgebra.schur(Ahp).values
+end
+
+function _plots_high_precision_eigen(A::AbstractMatrix{<:Real})
+    Ahp = _plots_spectrum_float64x4_matrix(A)
+    return LinearAlgebra.eigen(Ahp)
+end
+
 @inline function _normalize_boundary_condition(boundary_condition::Symbol)
     if boundary_condition === :radiative
         return :absorbing
@@ -129,7 +163,7 @@ function rk4_dt_max_from_spectrum(eigvals::AbstractVector{<:Complex}; tol::Float
     all(abs.(eigvals) .== 0) && return Inf
 
     lo = 0.0
-    hi = 1 / maximum(abs.(eigvals))
+    hi = 1 / Float64(maximum(abs.(eigvals)))
 
     while rk4_amplification_max(eigvals, hi) <= 1 + tol && hi < 1.0e9
         lo = hi
@@ -181,7 +215,7 @@ function spectral_analysis(
         boundary_condition = bc_norm,
         enforce_origin = enforce_origin
     )
-    eig = eigen(L)
+    eig = _plots_high_precision_eigen(L)
     eigvals = eig.values
     eigvecs = eig.vectors
 
@@ -294,7 +328,7 @@ function test_pole_stability(
         enforce_origin = enforce_origin
     )
 
-    eigvals_closed = eigvals(L_closed)
+    eigvals_closed = _plots_high_precision_schur_values(L_closed)
     real_parts = real.(eigvals_closed)
     max_real = isempty(real_parts) ? -Inf : maximum(real_parts)
     unstable_count = count(>(tol), real_parts)
@@ -508,8 +542,8 @@ function test_pole_stability_dissipative_overlay(
     L_diss_penalty = [Diss_block Z; Z Diss_block]
     L_dissipative = L_closed + L_diss_penalty
 
-    eig_closed = eigvals(L_closed)
-    eig_diss = eigvals(L_dissipative)
+    eig_closed = _plots_high_precision_schur_values(L_closed)
+    eig_diss = _plots_high_precision_schur_values(L_dissipative)
     max_real_closed = isempty(eig_closed) ? -Inf : maximum(real.(eig_closed))
     max_real_diss = isempty(eig_diss) ? -Inf : maximum(real.(eig_diss))
     is_stable = max_real_diss <= tol

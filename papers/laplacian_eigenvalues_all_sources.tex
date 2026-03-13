@@ -1,0 +1,119 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{booktabs}
+\usepackage{geometry}
+\geometry{margin=1in}
+\begin{filecontents*}{laplacian_eigenvalues_all_sources.bib}
+@article{dienerdorbandschnettertiglio2007,
+  author = {Diener and Dorband and Schnetter and Tiglio},
+  title = {Optimized high-order derivative and dissipation operators satisfying summation by parts, and applications in three-dimensional multi-block evolutions},
+  journal = {Journal of Scientific Computing},
+  year = {2007},
+  volume = {32},
+  number = {1},
+  pages = {109--145}
+}
+
+@article{mattsson2012,
+  author = {Mattsson},
+  title = {Summation by Parts Operators for Finite Difference Approximations of Second-Derivatives with Variable Coefficients},
+  journal = {Journal of Scientific Computing},
+  year = {2012},
+  volume = {51},
+  pages = {650--682}
+}
+
+@article{mattsson2014,
+  author = {Mattsson},
+  title = {Diagonal-norm summation by parts operators for finite difference approximations of third and fourth derivatives},
+  journal = {Journal of Computational Physics},
+  year = {2014},
+  volume = {274},
+  pages = {432--454}
+}
+
+@article{mattsson2017,
+  author = {Mattsson},
+  title = {Diagonal-norm upwind SBP operators},
+  journal = {Journal of Computational Physics},
+  year = {2017},
+  volume = {335},
+  pages = {283--310}
+}
+
+@article{mattssonalmquistcarpenter2014extended,
+  author = {Mattsson and Almquist and Carpenter},
+  title = {Optimal diagonal-norm SBP operators},
+  journal = {Journal of Computational Physics},
+  year = {2014},
+  volume = {264},
+  pages = {91--111}
+}
+
+@article{mattssonnordstrom2004,
+  author = {Mattsson and Nordström},
+  title = {Summation by parts operators for finite difference approximations of second derivatives},
+  journal = {Journal of Computational Physics},
+  year = {2004},
+  volume = {199},
+  pages = {503--540}
+}
+
+@article{mattssonsvardnordstrom2004,
+  author = {Mattsson and Svärd and Nordström},
+  title = {Stable and Accurate Artificial Dissipation},
+  journal = {Journal of Scientific Computing},
+  year = {2004},
+  volume = {21},
+  number = {1},
+  pages = {57--79}
+}
+
+@article{mattssonsvardshoeybi2008,
+  author = {Mattsson and Svärd and Shoeybi},
+  title = {Stable and accurate schemes for the compressible Navier-Stokes equations},
+  journal = {Journal of Computational Physics},
+  year = {2008},
+  volume = {227},
+  pages = {2293--2316}
+}
+
+@article{williamsduru2024,
+  author = {Williams and Duru},
+  title = {Full-Spectrum Dispersion Relation Preserving Summation-By-Parts Operators},
+  journal = {SIAM Journal on Numerical Analysis},
+  year = {2024},
+  volume = {62},
+  number = {4},
+  pages = {1565--1588}
+}
+
+\end{filecontents*}
+
+\begin{document}
+\begin{table}[htbp]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{0.44\linewidth}rrrr}
+\toprule
+Source & $\max |\Re(\lambda)|$ & $\max |\Im(\lambda)|$ & $\rho(L)$ & $\kappa_{\neq 0}(L)$ \\
+\midrule
+DienerDorbandSchnetterTiglio2007 \cite{dienerdorbandschnettertiglio2007} & 8.579989e+03 & 0.000000e+00 & 8.579989e+03 & 4.731345e+14 \\
+Mattsson2012 \cite{mattsson2012} & 8.579989e+03 & 0.000000e+00 & 8.579989e+03 & 4.731345e+14 \\
+Mattsson2014 \cite{mattsson2014} & 1.219214e+05 & 7.262608e+00 & 1.219214e+05 & 4.646055e+14 \\
+Mattsson2017 \cite{mattsson2017} & 1.253174e+07 & 0.000000e+00 & 1.253174e+07 & 1.969298e+16 \\
+MattssonAlmquistCarpenter2014Extended \cite{mattssonalmquistcarpenter2014extended} & 8.579989e+03 & 0.000000e+00 & 8.579989e+03 & 2.023431e+13 \\
+MattssonNordström2004 \cite{mattssonnordstrom2004} & 8.579989e+03 & 0.000000e+00 & 8.579989e+03 & 4.731345e+14 \\
+MattssonSvärdNordström2004 \cite{mattssonsvardnordstrom2004} & 8.579989e+03 & 0.000000e+00 & 8.579989e+03 & 4.731345e+14 \\
+MattssonSvärdShoeybi2008 \cite{mattssonsvardshoeybi2008} & 8.579989e+03 & 0.000000e+00 & 8.579989e+03 & 4.731345e+14 \\
+WilliamsDuru2024 \cite{williamsduru2024} & 8.875274e+06 & 1.064645e+02 & 8.875274e+06 & 1.269667e+16 \\
+\bottomrule
+\end{tabular}
+\caption{Laplacian spectral metrics for successful SBP sources (method=diagonal, N=31, order=4, p=2, R=1.0). Conditioning uses all eigenvalues with abs(lambda) != 0 exactly (zero tolerance = 0.0).}
+\label{tab:laplacian-spectrum-all-sources}
+\end{table}
+
+\bibliographystyle{plain}
+\bibliography{laplacian_eigenvalues_all_sources}
+\end{document}

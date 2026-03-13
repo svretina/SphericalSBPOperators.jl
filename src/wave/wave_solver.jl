@@ -56,8 +56,8 @@ stability abscissa with the most negative real eigenvalue of `D*G`.
 """
 function estimate_max_timestep(D::AbstractMatrix, G::AbstractMatrix, alg)
     z_min = compute_stability_limit(alg)
-    λ = eigen(Matrix(D * G)[1:(end - 1), 1:(end - 1)]).values
-    λ_min_real = minimum(real.(λ))
+    λ = _high_precision_schur_values(Matrix(D * G)[1:(end - 1), 1:(end - 1)])
+    λ_min_real = minimum(Float64.(real.(λ)))
     if λ_min_real >= -1.0e-12
         return 1.0
     end
@@ -145,7 +145,7 @@ function _rk4_dt_max_from_spectrum(
         tol::Float64 = 1.0e-6
     )
     isempty(eigvals) && return Inf
-    ρ = maximum(abs.(eigvals))
+    ρ = Float64(maximum(abs.(eigvals)))
     ρ <= eps(Float64) && return Inf
 
     rk4 = RK4()
@@ -187,8 +187,8 @@ function _check_provided_dt_stability(
         boundary_condition = boundary_condition,
         enforce_origin = enforce_origin
     )
-    eigvals = eigen(A).values
-    max_real = maximum(real.(eigvals))
+    eigvals = _high_precision_schur_values(A)
+    max_real = maximum(Float64.(real.(eigvals)))
 
     amp = _max_method_amplification(alg, eigvals, dt_step)
     stable = amp.max_amp <= 1 + stability_tol
@@ -219,7 +219,7 @@ function _check_provided_dt_stability(
         worst_scaled_eigenvalue = amp.worst_z,
         worst_stability_function_value = amp.worst_R,
         max_real_eigenvalue = max_real,
-        spectral_radius = maximum(abs.(eigvals)),
+        spectral_radius = Float64(maximum(abs.(eigvals))),
         suggested_dt_max = dt_limit,
     )
 end

@@ -78,14 +78,16 @@ end
     laplacian_spectrum(ops_or_mats)
     laplacian_spectrum(D, G)
 
-Compute eigenvalues of the discrete Laplacian `L = D*G` after conversion to
-`Matrix{Float64}` for robust eigensolver behavior across exact and floating
-operator constructions.
+Compute eigenvalues of the discrete Laplacian `L = D*G` with the package-wide
+high-precision spectrum path:
+
+1. convert matrix entries to `Rational{BigInt}`,
+2. convert to `Float64x4`,
+3. compute Schur values via `GenericSchur`.
 """
 function laplacian_spectrum(D::AbstractMatrix, G::AbstractMatrix)
-    Lf = Matrix{Float64}(laplacian_matrix(D, G; as_dense = true))
-    eigvals = eigen(Lf).values
-    return eigvals
+    L = laplacian_matrix(D, G; as_dense = true)
+    return _high_precision_schur_values(L)
 end
 
 function laplacian_spectrum(ops)

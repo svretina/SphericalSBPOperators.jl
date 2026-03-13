@@ -2,9 +2,11 @@ module SphericalSBPOperators
 
 using LinearAlgebra: dot, eigen, mul!, norm
 import LinearAlgebra
+using GenericSchur
 using CairoMakie
 using LaTeXStrings
 using LinearSolve: KLUFactorization
+using MultiFloats: Float64x4
 using OrdinaryDiffEqLowOrderRK: RK4
 using OrdinaryDiffEqSDIRK: ImplicitMidpoint
 using SciMLBase: DiscreteCallback, ODEFunction, ODEProblem, remake, solve
@@ -62,6 +64,7 @@ include("diagonal_mass/types.jl")
 include("diagonal_mass/snap.jl")
 include("diagonal_mass/fullgrid.jl")
 include("diagonal_mass/folding.jl")
+include("spectrum_precision.jl")
 include("non_diagonal_mass/sbp4.jl")
 include("non_diagonal_mass/sbp6.jl")
 include("non_diagonal_mass/sbp8.jl")

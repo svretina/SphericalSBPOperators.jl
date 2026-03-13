@@ -823,9 +823,9 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
     v_pd = _sbp8_is_pd(V)
 
     L = sparse(D * sys.G)
-    eigvals_L = stability_check || enforce_real_negative_spectrum ? _high_precision_schur_values(Matrix(L)) : Complex{Float64x4}[]
-    max_real_L = isempty(eigvals_L) ? NaN : maximum(Float64.(real.(eigvals_L)))
-    max_abs_imag_L = isempty(eigvals_L) ? NaN : maximum(Float64.(abs.(imag.(eigvals_L))))
+    eigvals_L = stability_check || enforce_real_negative_spectrum ? eigen(Matrix{Float64}(L)).values : ComplexF64[]
+    max_real_L = isempty(eigvals_L) ? NaN : maximum(real.(eigvals_L))
+    max_abs_imag_L = isempty(eigvals_L) ? NaN : maximum(abs.(imag.(eigvals_L)))
     spectrum_ok = isempty(eigvals_L) ? true :
                   (max_abs_imag_L <= spectrum_imag_tol && max_real_L <= spectrum_nonpositive_tol)
     if enforce_real_negative_spectrum && !spectrum_ok
@@ -1319,9 +1319,9 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     v_pd = _sbp8_is_pd(V)
 
     L = sparse(D * Geven)
-    eigvals_L = stability_check || enforce_real_negative_spectrum ? _high_precision_schur_values(Matrix(L)) : Complex{Float64x4}[]
-    max_real_L = isempty(eigvals_L) ? NaN : maximum(Float64.(real.(eigvals_L)))
-    max_abs_imag_L = isempty(eigvals_L) ? NaN : maximum(Float64.(abs.(imag.(eigvals_L))))
+    eigvals_L = stability_check || enforce_real_negative_spectrum ? eigen(Matrix{Float64}(L)).values : ComplexF64[]
+    max_real_L = isempty(eigvals_L) ? NaN : maximum(real.(eigvals_L))
+    max_abs_imag_L = isempty(eigvals_L) ? NaN : maximum(abs.(imag.(eigvals_L)))
     spectrum_ok = isempty(eigvals_L) ? true :
                   (max_abs_imag_L <= spectrum_imag_tol && max_real_L <= spectrum_nonpositive_tol)
     if enforce_real_negative_spectrum && !spectrum_ok

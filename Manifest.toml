@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0-beta2"
 manifest_format = "2.1"
-project_hash = "a2062b0d90abb45ab9db5f57e441b6524851f3fa"
+project_hash = "744d2202e8ab447219811cd5b24773d43dbe48cd"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
@@ -935,6 +935,13 @@ registries = "General"
 uuid = "14197337-ba66-59df-a3e3-ca00e7dcff7a"
 version = "0.3.19"
 
+[[deps.GenericSchur]]
+deps = ["LinearAlgebra", "Printf"]
+git-tree-sha1 = "a694e2a57394e409f7a11ee0977362a9fafcb8c7"
+registries = "General"
+uuid = "c145ed77-6b09-5dd9-b285-bf645a82121e"
+version = "0.5.6"
+
 [[deps.GeometryBasics]]
 deps = ["EarCut_jll", "Extents", "IterTools", "LinearAlgebra", "PrecompileTools", "Random", "StaticArrays"]
 git-tree-sha1 = "1f5a80f4ed9f5a4aada88fc2db456e637676414b"
@@ -1559,6 +1566,11 @@ registries = "General"
 uuid = "856f044c-d86e-5d09-b602-aeab76dc8ba7"
 version = "2025.2.0+0"
 
+[[deps.MPFR_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "GMP_jll", "Libdl"]
+uuid = "3a97d323-0669-5f0c-9066-3539efd106a3"
+version = "4.2.2+0"
+
 [[deps.MUMPS_seq_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "METIS_jll", "libblastrampoline_jll"]
 git-tree-sha1 = "afbaaa0fa2f001ad8091e27885d69973f8eae3d7"
@@ -1668,6 +1680,21 @@ git-tree-sha1 = "cac9cc5499c25554cba55cd3c30543cff5ca4fab"
 registries = "General"
 uuid = "46d2c3a1-f734-5fdb-9937-b9b9aeba4221"
 version = "0.2.4"
+
+[[deps.MultiFloats]]
+deps = ["LinearAlgebra", "MPFR_jll", "Printf", "Random", "SIMD"]
+git-tree-sha1 = "5f6a9a675aa04840091b21c8165f4b04883ee309"
+registries = "General"
+uuid = "bdf0d083-296b-4888-a5b6-7498122e68a5"
+version = "3.2.3"
+
+    [deps.MultiFloats.extensions]
+    MultiFloatsAMDGPUExt = "AMDGPU"
+    MultiFloatsCUDAExt = "CUDA"
+
+    [deps.MultiFloats.weakdeps]
+    AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
+    CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 
 [[deps.MutableArithmetics]]
 deps = ["LinearAlgebra", "SparseArrays", "Test"]
@@ -2531,7 +2558,7 @@ weakdeps = ["ChainRulesCore"]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
 
 [[deps.SphericalSBPOperators]]
-deps = ["CDDLib", "CairoMakie", "DrWatson", "Ipopt", "JuMP", "LaTeXStrings", "LinearAlgebra", "LinearSolve", "MakiePublication", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "SciMLBase", "SparseArrays", "SummationByPartsOperators"]
+deps = ["CDDLib", "CairoMakie", "DrWatson", "GenericSchur", "Ipopt", "JuMP", "LaTeXStrings", "LinearAlgebra", "LinearSolve", "MakiePublication", "Optim", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Printf", "SciMLBase", "SparseArrays", "SummationByPartsOperators"]
 path = "."
 uuid = "54f2a669-6442-4ec9-9f33-60161b4634ca"
 version = "0.1.0"
