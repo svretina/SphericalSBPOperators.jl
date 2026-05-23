@@ -1,4 +1,4 @@
-import SphericalSBPOperators: solve_wave_ode, spherical_operators, validate
+import SphericalSBPOperators: solve_wave_ode, diagonal_spherical_operators, validate
 import SummationByPartsOperators: MattssonNordström2004
 
 using OrdinaryDiffEqLowOrderRK: RK4
@@ -76,7 +76,7 @@ function run_wave_evolution(;
 
     source = MattssonNordström2004()
 
-    ops = spherical_operators(
+    ops = diagonal_spherical_operators(
         source;
         accuracy_order = accuracy_order,
         N = N,

@@ -658,7 +658,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     using SummationByPartsOperators: MattssonNordström2004, SafeMode
 
     source = MattssonNordström2004()
-    ops = spherical_operators(
+    ops = diagonal_spherical_operators(
                               source;
                               accuracy_order = 8,
                               N = 24,

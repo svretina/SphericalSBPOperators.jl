@@ -26,18 +26,15 @@ function compute_stability_limit(alg; tol::Real = 1.0e-3, max_search::Real = -1.
     max_search < 0 || throw(ArgumentError("`max_search` must be negative."))
 
     linear_test_rhs(u, p, t) = p[1] * u
-    prob = ODEProblem(
-        linear_test_rhs, ComplexF64[1.0 + 0im], (0.0, 1.0), ComplexF64[0.0 + 0im]
-    )
+    prob = ODEProblem(linear_test_rhs, ComplexF64[1.0 + 0im], (0.0, 1.0),
+                      ComplexF64[0.0 + 0im])
     z_left = Float64(max_search)
     z_right = 0.0
 
     while abs(z_right - z_left) > Float64(tol)
         z_mid = 0.5 * (z_left + z_right)
-        sol = solve(
-            remake(prob, p = ComplexF64[z_mid + 0im]), alg;
-            adaptive = false, dt = 1.0, verbose = false
-        )
+        sol = solve(remake(prob, p = ComplexF64[z_mid + 0im]), alg;
+                    adaptive = false, dt = 1.0, verbose = false)
         if abs(sol.u[end][1]) <= 1.0 + Float64(tol)
             z_right = z_mid
         else
@@ -66,21 +63,32 @@ function estimate_max_timestep(D::AbstractMatrix, G::AbstractMatrix, alg)
 end
 
 """
-    estimate_wave_timestep(ops; alg=RK4(), safety_factor=0.9)
+    estimate_wave_timestep(ops; alg=TsitPap8(), safety_factor=0.9,
+                           boundary_condition=:absorbing, enforce_origin=true)
 
-Estimate a stable explicit timestep using the linear operator stability estimate for
-`Π_t = D Ξ, Ξ_t = G Π`, mapped to the second-order form `u_t = D G u`.
+Estimate a stable fixed timestep for the first-order wave system by requiring the
+scaled semidiscrete eigenvalues `dt * λ` to lie inside the absolute-stability region
+of `alg`.
 """
-function estimate_wave_timestep(
-        ops::WaveOperators;
-        alg = RK4(),
-        safety_factor::Real = 0.9
-    )
+function estimate_wave_timestep(ops::WaveOperators;
+                                alg = TsitPap8(),
+                                safety_factor::Real = 0.9,
+                                boundary_condition::Symbol = :absorbing,
+                                enforce_origin::Bool = true,
+                                stability_tol::Real = 1.0e-6)
     safety_factor > 0 || throw(ArgumentError("`safety_factor` must be positive."))
+    stability_tol > 0 || throw(ArgumentError("`stability_tol` must be positive."))
 
-    Dscaled = Matrix(ops.D)
-    G = Matrix(ops.Geven)
-    dt_max = estimate_max_timestep(Dscaled, G, alg)
+    A = _wave_linear_operator(ops;
+                              boundary_condition = _normalize_boundary_condition(boundary_condition),
+                              enforce_origin = _resolve_enforce_origin(ops, enforce_origin))
+    eigvals = _high_precision_schur_values(A)
+    max_real = maximum(Float64.(real.(eigvals)))
+    dt_max = if alg isa ImplicitMidpoint
+        max_real <= Float64(stability_tol) ? Inf : 0.0
+    else
+        _fixed_step_dt_max_from_spectrum(alg, eigvals; tol = Float64(stability_tol))
+    end
     dt_max > 0 || throw(ArgumentError("Estimated non-positive timestep $dt_max."))
     return Float64(safety_factor) * dt_max
 end
@@ -89,81 +97,87 @@ end
 @inline _method_stability_function(::ImplicitMidpoint, z) = (1 + z / 2) / (1 - z / 2)
 
 function _method_stability_function(alg, z)
-    throw(
-        ArgumentError(
-            "No stability-function implementation for algorithm $(typeof(alg)). " *
-                "Provided-`dt` stability checks currently support `RK4()` and `ImplicitMidpoint()`."
-        )
-    )
+    linear_test_rhs(u, p, t) = p[1] * u
+    prob = ODEProblem(linear_test_rhs,
+                      ComplexF64[1.0 + 0im],
+                      (0.0, 1.0),
+                      ComplexF64[ComplexF64(z)])
+    sol = solve(prob, alg;
+                adaptive = false,
+                dt = 1.0,
+                save_everystep = false,
+                save_start = false,
+                dense = false,
+                verbose = false)
+    return sol.u[end][1]
 end
 
-function _wave_linear_operator(
-        ops::WaveOperators;
-        boundary_condition::Symbol,
-        enforce_origin::Bool
-    )
+function _wave_linear_operator(ops::WaveOperators;
+                               boundary_condition::Symbol,
+                               enforce_origin::Bool)
     n = length(ops.r)
-    params = WaveODEParams(
-        ops;
-        boundary_condition = boundary_condition,
-        enforce_origin = enforce_origin
-    )
-    A = Matrix{Float64}(wave_system_jac_prototype(ops; boundary_condition = boundary_condition))
+    params = WaveODEParams(ops;
+                           boundary_condition = boundary_condition,
+                           enforce_origin = enforce_origin)
+    A = Matrix{Float64}(wave_system_jac_prototype(ops;
+                                                  boundary_condition = boundary_condition))
     wave_system_jac!(A, zeros(Float64, 2 * n), params, 0.0)
     return A
 end
 
-function _max_method_amplification(
-        alg,
-        eigvals::AbstractVector{<:Complex},
-        dt::Real
-    )
+function _max_method_amplification(alg,
+                                   eigvals::AbstractVector{<:Complex},
+                                   dt::Real)
     isempty(eigvals) &&
-        return (
-        max_amp = 0.0,
-        worst_index = 0,
-        worst_lambda = 0.0 + 0.0im,
-        worst_z = 0.0 + 0.0im,
-        worst_R = 1.0 + 0.0im,
-    )
+        return (max_amp = 0.0,
+                worst_index = 0,
+                worst_lambda = 0.0 + 0.0im,
+                worst_z = 0.0 + 0.0im,
+                worst_R = 1.0 + 0.0im)
 
     zvals = ComplexF64.(Float64(dt) .* eigvals)
     Rvals = _method_stability_function.(Ref(alg), zvals)
     amp = abs.(Rvals)
     idx = argmax(amp)
-    return (
-        max_amp = amp[idx],
-        worst_index = idx,
-        worst_lambda = eigvals[idx],
-        worst_z = zvals[idx],
-        worst_R = Rvals[idx],
-    )
+    return (max_amp = amp[idx],
+            worst_index = idx,
+            worst_lambda = eigvals[idx],
+            worst_z = zvals[idx],
+            worst_R = Rvals[idx])
 end
 
-function _rk4_dt_max_from_spectrum(
-        eigvals::AbstractVector{<:Complex};
-        tol::Float64 = 1.0e-6
-    )
+function _nontrivial_eigenvalues(eigvals::AbstractVector{<:Complex};
+                                 atol::Float64 = 1.0e-12,
+                                 rtol::Float64 = 1.0e-10)
+    isempty(eigvals) && return eigvals
+    ρ = Float64(maximum(abs.(eigvals)))
+    tol = max(atol, rtol * max(1.0, ρ))
+    keep = findall(λ -> abs(λ) > tol, eigvals)
+    return isempty(keep) ? eigvals : eigvals[keep]
+end
+
+function _fixed_step_dt_max_from_spectrum(alg,
+                                          eigvals::AbstractVector{<:Complex};
+                                          tol::Float64 = 1.0e-6)
     isempty(eigvals) && return Inf
     ρ = Float64(maximum(abs.(eigvals)))
     ρ <= eps(Float64) && return Inf
 
-    rk4 = RK4()
     lo = 0.0
     hi = 1 / ρ
 
-    while _max_method_amplification(rk4, eigvals, hi).max_amp <= 1 + tol && hi < 1.0e9
+    while _max_method_amplification(alg, eigvals, hi).max_amp <= 1 + tol && hi < 1.0e9
         lo = hi
         hi *= 1.5
     end
 
-    if hi >= 1.0e9 && _max_method_amplification(rk4, eigvals, hi).max_amp <= 1 + tol
+    if hi >= 1.0e9 && _max_method_amplification(alg, eigvals, hi).max_amp <= 1 + tol
         return hi
     end
 
     for _ in 1:100
         mid = 0.5 * (lo + hi)
-        if _max_method_amplification(rk4, eigvals, mid).max_amp <= 1 + tol
+        if _max_method_amplification(alg, eigvals, mid).max_amp <= 1 + tol
             lo = mid
         else
             hi = mid
@@ -173,55 +187,46 @@ function _rk4_dt_max_from_spectrum(
     return lo
 end
 
-function _check_provided_dt_stability(
-        ops::WaveOperators,
-        dt_step::Float64,
-        alg;
-        boundary_condition::Symbol,
-        enforce_origin::Bool,
-        stability_tol::Float64 = 1.0e-6,
-        throw_on_failure::Bool = true
-    )
-    A = _wave_linear_operator(
-        ops;
-        boundary_condition = boundary_condition,
-        enforce_origin = enforce_origin
-    )
+function _check_provided_dt_stability(ops::WaveOperators,
+                                      dt_step::Float64,
+                                      alg;
+                                      boundary_condition::Symbol,
+                                      enforce_origin::Bool,
+                                      stability_tol::Float64 = 1.0e-6,
+                                      throw_on_failure::Bool = true)
+    A = _wave_linear_operator(ops;
+                              boundary_condition = boundary_condition,
+                              enforce_origin = enforce_origin)
     eigvals = _high_precision_schur_values(A)
     max_real = maximum(Float64.(real.(eigvals)))
+    max_abs_imag = maximum(abs.(Float64.(imag.(eigvals))))
+    eigvals_nonzero = _nontrivial_eigenvalues(eigvals)
 
-    amp = _max_method_amplification(alg, eigvals, dt_step)
+    amp = _max_method_amplification(alg, eigvals_nonzero, dt_step)
     stable = amp.max_amp <= 1 + stability_tol
 
-    dt_limit = if alg isa RK4
-        _rk4_dt_max_from_spectrum(eigvals; tol = stability_tol)
-    elseif alg isa ImplicitMidpoint
+    dt_limit = if alg isa ImplicitMidpoint
         max_real <= stability_tol ? Inf : 0.0
     else
-        NaN
+        _fixed_step_dt_max_from_spectrum(alg, eigvals; tol = stability_tol)
     end
 
     if !stable && throw_on_failure
-        throw(
-            ArgumentError(
-                "Provided `dt`=$dt_step is not stable for $(typeof(alg)) under linear spectral check " *
-                    "(boundary_condition=$boundary_condition, enforce_origin=$enforce_origin). " *
-                    "max |R(dt*λ)|=$(amp.max_amp) at λ=$(amp.worst_lambda), dt*λ=$(amp.worst_z), " *
-                    "max Re(λ)=$max_real, suggested dt ≤ $dt_limit."
-            )
-        )
+        throw(ArgumentError("Provided `dt`=$dt_step is not stable for $(typeof(alg)) under linear spectral check " *
+                            "(boundary_condition=$boundary_condition, enforce_origin=$enforce_origin). " *
+                            "max |R(dt*λ)|=$(amp.max_amp) at λ=$(amp.worst_lambda), dt*λ=$(amp.worst_z), " *
+                            "max Re(λ)=$max_real, suggested dt ≤ $dt_limit."))
     end
 
-    return (
-        stable = stable,
-        max_amplification = amp.max_amp,
-        worst_eigenvalue = amp.worst_lambda,
-        worst_scaled_eigenvalue = amp.worst_z,
-        worst_stability_function_value = amp.worst_R,
-        max_real_eigenvalue = max_real,
-        spectral_radius = Float64(maximum(abs.(eigvals))),
-        suggested_dt_max = dt_limit,
-    )
+    return (stable = stable,
+            max_amplification = amp.max_amp,
+            worst_eigenvalue = amp.worst_lambda,
+            worst_scaled_eigenvalue = amp.worst_z,
+            worst_stability_function_value = amp.worst_R,
+            max_real_eigenvalue = max_real,
+            max_abs_imag_eigenvalue = max_abs_imag,
+            spectral_radius = Float64(maximum(abs.(eigvals))),
+            suggested_dt_max = dt_limit)
 end
 
 function _build_saveat(dt::Float64, nsteps::Int, save_every::Int)
@@ -232,6 +237,126 @@ function _build_saveat(dt::Float64, nsteps::Int, save_every::Int)
     return dt .* Float64.(indices)
 end
 
+function _wave_spacing_stats(r::AbstractVector)
+    length(r) >= 2 ||
+        throw(ArgumentError("Need at least two grid points to estimate spacing."))
+    dr = diff(Float64.(r))
+    return (min = minimum(dr),
+            max = maximum(dr),
+            mean = sum(dr) / length(dr))
+end
+
+_wave_format_diag_value(x::Integer) = string(x)
+_wave_format_diag_value(x::Symbol) = string(x)
+_wave_format_diag_value(x::Bool) = x ? "yes" : "no"
+_wave_format_diag_value(x::AbstractString) = x
+_wave_format_diag_value(x::Type) = string(x)
+_wave_format_diag_value(x) = @sprintf("%.6e", Float64(x))
+
+function _wave_format_table(title::AbstractString, rows::Vector{Tuple{String, String}})
+    key_width = maximum(length(first(row)) for row in rows)
+    value_width = maximum(length(last(row)) for row in rows)
+    inner_width = key_width + value_width + 7
+    border = "+" * repeat("-", inner_width) * "+"
+    title_pad = max(0, inner_width - length(title) - 2)
+    left_pad = fld(title_pad, 2)
+    right_pad = title_pad - left_pad
+    title_row = "|" * repeat(" ", left_pad + 1) * title * repeat(" ", right_pad + 1) * "|"
+
+    io = IOBuffer()
+    println(io, border)
+    println(io, title_row)
+    println(io, border)
+    for (key, value) in rows
+        println(io,
+                "| ",
+                rpad(key, key_width),
+                " | ",
+                rpad(value, value_width),
+                " |")
+    end
+    print(io, border)
+    return String(take!(io))
+end
+
+function _print_wave_presolve_diagnostics(ops::WaveOperators,
+                                          alg,
+                                          bc_norm::Symbol,
+                                          mode::Symbol,
+                                          state_layout::Symbol,
+                                          r::AbstractVector,
+                                          T_final::Real,
+                                          dt_raw::Float64,
+                                          dt_step::Float64,
+                                          nsteps::Int,
+                                          save_every::Int,
+                                          enforce_origin_effective::Bool,
+                                          initial_data_check,
+                                          noise_amplitude::Real,
+                                          noise_seed,
+                                          dt_stability)
+    spacing = _wave_spacing_stats(r)
+    cfl = dt_step / spacing.min
+    initial_energy = wave_energy(ops, initial_data_check.pi, initial_data_check.psi)
+
+    rows = Tuple{String, String}[("operator", string(typeof(ops))),
+                                 ("accuracy_order",
+                                  _wave_format_diag_value(ops.accuracy_order)),
+                                 ("p", _wave_format_diag_value(ops.p)),
+                                 ("domain",
+                                  "[$(_wave_format_diag_value(0.0)), $(_wave_format_diag_value(ops.R))]"),
+                                 ("grid_support",
+                                  "[$(_wave_format_diag_value(first(r))), $(_wave_format_diag_value(last(r)))]"),
+                                 ("has_origin_node",
+                                  _wave_format_diag_value(_has_origin_node(ops))),
+                                 ("Nh", _wave_format_diag_value(length(r))),
+                                 ("M_full", _wave_format_diag_value(ops.M_full)),
+                                 ("closure_width",
+                                  _wave_format_diag_value(ops.closure_width)),
+                                 ("integrator", string(typeof(alg))),
+                                 ("state_layout", _wave_format_diag_value(state_layout)),
+                                 ("initial_data_mode", _wave_format_diag_value(mode)),
+                                 ("boundary_condition", _wave_format_diag_value(bc_norm)),
+                                 ("enforce_origin",
+                                  _wave_format_diag_value(enforce_origin_effective)),
+                                 ("T_final", _wave_format_diag_value(T_final)),
+                                 ("dt_estimate/raw", _wave_format_diag_value(dt_raw)),
+                                 ("dt_effective", _wave_format_diag_value(dt_step)),
+                                 ("nsteps", _wave_format_diag_value(nsteps)),
+                                 ("save_every", _wave_format_diag_value(save_every)),
+                                 ("dr_min", _wave_format_diag_value(spacing.min)),
+                                 ("dr_max", _wave_format_diag_value(spacing.max)),
+                                 ("dr_mean", _wave_format_diag_value(spacing.mean)),
+                                 ("CFL = dt/dr_min", _wave_format_diag_value(cfl)),
+                                 ("initial_energy",
+                                  _wave_format_diag_value(initial_energy)),
+                                 ("potential_residual_l2",
+                                  _wave_format_diag_value(initial_data_check.potential.residual_l2_abs)),
+                                 ("max|Geven*Pi0|",
+                                  _wave_format_diag_value(initial_data_check.potential.max_abs_GPi))]
+
+    if dt_stability !== nothing
+        push!(rows,
+              ("max|R(dt*lambda)|",
+               _wave_format_diag_value(dt_stability.max_amplification)))
+        push!(rows,
+              ("spectral_radius", _wave_format_diag_value(dt_stability.spectral_radius)))
+        push!(rows,
+              ("max |Im(lambda)|",
+               _wave_format_diag_value(dt_stability.max_abs_imag_eigenvalue)))
+        push!(rows,
+              ("max Re(lambda)", _wave_format_diag_value(dt_stability.max_real_eigenvalue)))
+        push!(rows,
+              ("worst dt*lambda", string(dt_stability.worst_scaled_eigenvalue)))
+    end
+    if noise_amplitude > 0
+        push!(rows, ("noise_amplitude", _wave_format_diag_value(noise_amplitude)))
+        push!(rows, ("noise_seed", noise_seed === nothing ? "auto" : string(noise_seed)))
+    end
+
+    return println(_wave_format_table("Wave Solve Pre-Run Diagnostics", rows))
+end
+
 @inline _lcg_step(x::UInt64) = x * 6364136223846793005 + 1442695040888963407
 
 @inline function _lcg_symmetric_unit!(state::Base.RefValue{UInt64})
@@ -240,71 +365,47 @@ end
     return 2.0 * (Float64(s) / Float64(typemax(UInt64))) - 1.0
 end
 
-function _step_noise_callback(
-        noise_amplitude::Real,
-        n::Int,
-        state_layout::Symbol,
-        enforce_origin::Bool,
-        has_origin_node::Bool;
-        noise_seed::Union{Nothing, Int} = nothing
-    )
+function _step_noise_callback(noise_amplitude::Real,
+                              n::Int,
+                              state_layout::Symbol,
+                              enforce_origin::Bool,
+                              has_origin_node::Bool;
+                              noise_seed::Union{Nothing, Int} = nothing)
     noise_amplitude > 0 || return nothing
     state_layout in (:matrix, :vector) ||
         throw(ArgumentError("`state_layout` must be either `:matrix` or `:vector`."))
 
     amp = Float64(noise_amplitude)
     seed_u = noise_seed === nothing ? UInt64(time_ns()) :
-        reinterpret(UInt64, Int64(noise_seed))
+             reinterpret(UInt64, Int64(noise_seed))
     state = Ref(seed_u == 0 ? 0x9e3779b97f4a7c15 : seed_u)
 
     step_noise_condition(u, t, integrator) = integrator.iter > 0
 
     function affect!(integrator)
         U = integrator.u
-        π = nothing
-        ξ = nothing
+        Π = nothing
+        Ψ = nothing
         if state_layout === :vector
-            π = @view U[1:n]
-            ξ = @view U[(n + 1):(2 * n)]
+            Π = @view U[1:n]
+            Ψ = @view U[(n + 1):(2 * n)]
         else
-            π = @view U[:, 1]
-            ξ = @view U[:, 2]
+            Π = @view U[:, 1]
+            Ψ = @view U[:, 2]
         end
 
         for i in 1:n
-            π[i] = π[i] + amp * _lcg_symmetric_unit!(state)
-            ξ[i] = ξ[i] + amp * _lcg_symmetric_unit!(state)
+            Π[i] = Π[i] + amp * _lcg_symmetric_unit!(state)
+            Ψ[i] = Ψ[i] + amp * _lcg_symmetric_unit!(state)
         end
-        apply_symmetry_state!(
-            π,
-            ξ;
-            enforce_origin = enforce_origin,
-            has_origin_node = has_origin_node
-        )
+        apply_symmetry_state!(Π,
+                              Ψ;
+                              enforce_origin = enforce_origin,
+                              has_origin_node = has_origin_node)
         return nothing
     end
 
     return DiscreteCallback(step_noise_condition, affect!; save_positions = (false, false))
-end
-
-function _pick_keyword(primary, legacy, primary_name::AbstractString, legacy_name::AbstractString)
-    if primary !== nothing && legacy !== nothing
-        throw(ArgumentError("Use either `$primary_name` or `$legacy_name`, not both."))
-    end
-    return primary === nothing ? legacy : primary
-end
-
-function _extract_legacy_initial_data_kwargs(kwargs)
-    allowed_legacy_kwargs = (:ϕ0, :Π0, :Ξ0)
-    for key in keys(kwargs)
-        key in allowed_legacy_kwargs ||
-            throw(ArgumentError("Unsupported keyword argument `$key`."))
-    end
-
-    legacy_phi0 = haskey(kwargs, :ϕ0) ? kwargs[:ϕ0] : nothing
-    legacy_pi0 = haskey(kwargs, :Π0) ? kwargs[:Π0] : nothing
-    legacy_xi0 = haskey(kwargs, :Ξ0) ? kwargs[:Ξ0] : nothing
-    return (legacy_phi0 = legacy_phi0, legacy_pi0 = legacy_pi0, legacy_xi0 = legacy_xi0)
 end
 
 @inline function _normalize_initial_data_mode(mode::Symbol)
@@ -322,76 +423,79 @@ end
     solve_wave_ode(ops; kwargs...)
 
 Evolve the first-order radial wave system using SciML `ODEProblem` and
-`OrdinaryDiffEqLowOrderRK.RK4`.
+`OrdinaryDiffEqHighOrderRK.TsitPap8`.
 
 State variables on `[0, R]`:
 - `Π(t, r)` even field (time derivative of scalar potential),
-- `Ξ(t, r)` odd radial derivative field.
+- `Ψ(t, r)` odd radial derivative field.
 
 Semidiscrete equations:
-- `∂t Π = D * Ξ`
-- `∂t Ξ = Geven * Π`
+- `∂t Π = D * Ψ`
+- `∂t Ψ = Geven * Π`
 
 Constraints are applied once per RHS call, after derivative construction:
-- symmetry: `dΞ(0)=0`
-- boundary condition on `(dΠ, dΞ)` at `r=R`
+- symmetry: `dΨ(0)=0`
+- boundary condition on `(dΠ, dΨ)` at `r=R`
 
 Keyword options:
 - `T_final`: final time (required).
 - `dt`: fixed timestep. If `nothing`, uses `estimate_wave_timestep`.
-- `alg`: one-step algorithm (default `RK4()` from `OrdinaryDiffEqLowOrderRK`).
-- `state_layout`: `:matrix` (`U[:,1]=Π, U[:,2]=Ξ`) or `:vector` (`U=[Π;Ξ]`).
+- `alg`: one-step algorithm (default `TsitPap8()` from `OrdinaryDiffEqHighOrderRK`).
+- `state_layout`: `:matrix` (`U[:,1]=Π, U[:,2]=Ψ`) or `:vector` (`U=[Π;Ψ]`).
   Defaults to `:vector` when `alg isa ImplicitMidpoint`, otherwise `:matrix`.
 - `boundary_condition`: `:absorbing`, `:reflecting`, `:dirichlet`, or `:none`.
   Aliases: `:radiative` => `:absorbing`, `:reflective` => `:reflecting`.
-- initial data: `phi0`, `pi0`, `xi0` (legacy aliases `ϕ0`, `Π0`, `Ξ0` still accepted).
-  If `xi0` is omitted in `:auto` mode, `xi0 = Geven * phi0`.
+- initial data: `phi0`, `pi0`, `psi0`.
+  If `psi0` is omitted in `:auto` mode, `psi0 = Geven * phi0`.
 - potential mode: set `initial_data_mode=:potential` and provide `phi0` (and optionally
-  `pi0`); then `xi0` is always built as `Geven * phi0`.
-- characteristic mode: provide `w_in0`, `w_out0` (or `win0`, `wout0`) or set
+  `pi0`); then `psi0` is always built as `Geven * phi0`.
+- characteristic mode: provide `w_in0`, `w_out0` or set
   `initial_data_mode=:characteristic`; then
-  `pi0 = 0.5*(w_in0+w_out0)`, `xi0 = 0.5*(w_in0-w_out0)`.
-- `xi` growth note: even if `xi0=0`, non-constant `pi0` gives immediate
-  `xi_t = Geven*pi0`, so `xi` appears right away. This is expected coupling.
-- `save_every`: save every `save_every` RK steps (always saves final state).
+  `pi0 = 0.5*(w_in0+w_out0)`, `psi0 = 0.5*(w_in0-w_out0)`.
+- `psi` growth note: even if `psi0=0`, non-constant `pi0` gives immediate
+  `psi_t = Geven*pi0`, so `Ψ` appears right away. This is expected coupling.
+- `save_every`: save every `save_every` fixed steps (always saves final state).
 - `enforce_origin`: enforce odd symmetry at origin.
 - if `dt` is provided explicitly, linear spectral stability is checked against
   the selected one-step integrator.
 - `noise_amplitude`: if positive, add uniform random noise in `[-a,a]` to both
   fields after every fixed step.
 - `noise_seed`: optional seed for reproducible step-noise.
+- `operator_backend`: use `:sparse` for Julia's sparse `mul!` or `:kernel`
+  for the specialized wave matrix kernels in the explicit RHS path.
 """
-function solve_wave_ode(
-        ops::WaveOperators;
-        T_final::Real,
-        dt = nothing,
-        alg = RK4(),
-        state_layout = (alg isa ImplicitMidpoint ? :vector : :matrix),
-        safety_factor::Real = 0.9,
-        boundary_condition::Symbol = :absorbing,
-        phi0 = nothing,
-        pi0 = nothing,
-        xi0 = nothing,
-        w_in0 = nothing,
-        w_out0 = nothing,
-        win0 = nothing,
-        wout0 = nothing,
-        initial_data_mode::Symbol = :auto,
-        save_every::Int = 1,
-        enforce_origin::Bool = true,
-        check_provided_dt_stability::Bool = true,
-        stability_tol::Real = 1.0e-6,
-        noise_amplitude::Real = 0.0,
-        noise_seed::Union{Nothing, Int} = nothing,
-        check_initial_data::Bool = true,
-        initial_data_tol = nothing,
-        verbose::Bool = false,
-        kwargs...
-    )
+function solve_wave_ode(ops::WaveOperators;
+                        T_final::Real,
+                        dt = nothing,
+                        alg = TsitPap8(),
+                        state_layout = (alg isa ImplicitMidpoint ? :vector : :matrix),
+                        safety_factor::Real = 0.9,
+                        boundary_condition::Symbol = :absorbing,
+                        phi0 = nothing,
+                        pi0 = nothing,
+                        psi0 = nothing,
+                        w_in0 = nothing,
+                        w_out0 = nothing,
+                        initial_data_mode::Symbol = :auto,
+                        save_every::Int = 1,
+                        enforce_origin::Bool = true,
+                        check_provided_dt_stability::Bool = true,
+                        stability_tol::Real = 1.0e-6,
+                        noise_amplitude::Real = 0.0,
+                        noise_seed::Union{Nothing, Int} = nothing,
+                        operator_backend::Symbol = :sparse,
+                        check_initial_data::Bool = true,
+                        initial_data_tol = nothing,
+                        verbose::Bool = false)
     T_final > 0 || throw(ArgumentError("`T_final` must be positive."))
     save_every > 0 || throw(ArgumentError("`save_every` must be positive."))
     state_layout in (:matrix, :vector) ||
         throw(ArgumentError("`state_layout` must be either `:matrix` or `:vector`."))
+    operator_backend in (:sparse, :kernel) ||
+        throw(ArgumentError("`operator_backend` must be either `:sparse` or `:kernel`."))
+    if operator_backend === :kernel && alg isa ImplicitMidpoint
+        throw(ArgumentError("`operator_backend=:kernel` is currently for explicit RHS calls; ImplicitMidpoint still needs the sparse Jacobian path."))
+    end
 
     r = Float64.(ops.r)
     n = length(r)
@@ -399,12 +503,11 @@ function solve_wave_ode(
     has_origin_node = _has_origin_node(ops)
     enforce_origin_effective = _resolve_enforce_origin(ops, enforce_origin)
 
-    legacy = _extract_legacy_initial_data_kwargs(kwargs)
-    phi_input = _pick_keyword(phi0, legacy.legacy_phi0, "phi0", "ϕ0")
-    pi_input = _pick_keyword(pi0, legacy.legacy_pi0, "pi0", "Π0")
-    xi_input = _pick_keyword(xi0, legacy.legacy_xi0, "xi0", "Ξ0")
-    w_in_input = _pick_keyword(w_in0, win0, "w_in0", "win0")
-    w_out_input = _pick_keyword(w_out0, wout0, "w_out0", "wout0")
+    phi_input = phi0
+    pi_input = pi0
+    psi_input = psi0
+    w_in_input = w_in0
+    w_out_input = w_out0
     mode = _normalize_initial_data_mode(initial_data_mode)
     has_characteristics = (w_in_input !== nothing) || (w_out_input !== nothing)
 
@@ -416,35 +519,33 @@ function solve_wave_ode(
 
     phi_init = _vector_from_input(phi_input, r, "phi0")
     pi_init = _vector_from_input(pi_input, r, "pi0")
-    xi_init = _vector_from_input(xi_input, r, "xi0")
+    psi_init = _vector_from_input(psi_input, r, "psi0")
 
     if mode === :characteristic
-        if xi_input !== nothing || pi_input !== nothing
-            throw(ArgumentError("Do not pass `pi0`/`xi0` with characteristic initial data. Use `w_in0`,`w_out0` only."))
+        if psi_input !== nothing || pi_input !== nothing
+            throw(ArgumentError("Do not pass `pi0`/`psi0` with characteristic initial data. Use `w_in0`,`w_out0` only."))
         end
         w_in_data = w_in_input === nothing ? zeros(Float64, n) : w_in_input
         w_out_data = w_out_input === nothing ? zeros(Float64, n) : w_out_input
-        char_data = characteristic_initial_data(
-            r;
-            w_in0 = w_in_data,
-            w_out0 = w_out_data,
-            enforce_origin = enforce_origin_effective,
-            has_origin_node = has_origin_node
-        )
+        char_data = characteristic_initial_data(r;
+                                                w_in0 = w_in_data,
+                                                w_out0 = w_out_data,
+                                                enforce_origin = enforce_origin_effective,
+                                                has_origin_node = has_origin_node)
         pi_init = char_data.pi0
-        xi_init = char_data.xi0
+        psi_init = char_data.psi0
         if phi_init === nothing
             phi_init = zeros(Float64, n)
         end
     elseif mode === :potential
         phi_init === nothing &&
             throw(ArgumentError("`initial_data_mode=:potential` requires `phi0`."))
-        xi_input === nothing ||
-            throw(ArgumentError("`initial_data_mode=:potential` does not accept explicit `xi0`; it is built as `Geven*phi0`."))
+        psi_input === nothing ||
+            throw(ArgumentError("`initial_data_mode=:potential` does not accept explicit `psi0`; it is built as `Geven*phi0`."))
         if pi_init === nothing
             pi_init = zeros(Float64, n)
         end
-        xi_init = Float64.(ops.Geven * phi_init)
+        psi_init = Float64.(ops.Geven * phi_init)
     else
         if phi_init === nothing
             phi_init = default_wave_profile(r)
@@ -452,63 +553,51 @@ function solve_wave_ode(
         if pi_init === nothing
             pi_init = zeros(Float64, n)
         end
-        if xi_init === nothing
-            xi_init = Float64.(ops.Geven * phi_init)
+        if psi_init === nothing
+            psi_init = Float64.(ops.Geven * phi_init)
         end
     end
 
     bc_norm = _normalize_boundary_condition(boundary_condition)
-    initialize_wave_state!(
-        pi_init,
-        xi_init;
-        enforce_origin = enforce_origin_effective,
-        has_origin_node = has_origin_node
-    )
+    initialize_wave_state!(pi_init,
+                           psi_init;
+                           enforce_origin = enforce_origin_effective,
+                           has_origin_node = has_origin_node)
 
-    initial_data_check_wave = check_wave_data_consistency(
-        pi_init,
-        xi_init;
-        boundary_condition = bc_norm,
-        enforce_origin = enforce_origin_effective,
-        has_origin_node = has_origin_node,
-        require_boundary = false,
-        tol = initial_data_tol
-    )
-    potential_check = check_potential_consistency(
-        ops,
-        pi_init,
-        xi_init;
-        tol = initial_data_tol
-    )
-    initial_data_check = merge(
-        initial_data_check_wave, (
-            potential = potential_check, mode = mode,
-        )
-    )
+    initial_data_check_wave = check_wave_data_consistency(pi_init,
+                                                          psi_init;
+                                                          boundary_condition = bc_norm,
+                                                          enforce_origin = enforce_origin_effective,
+                                                          has_origin_node = has_origin_node,
+                                                          require_boundary = false,
+                                                          tol = initial_data_tol)
+    potential_check = check_potential_consistency(ops,
+                                                  pi_init,
+                                                  psi_init;
+                                                  tol = initial_data_tol)
+    initial_data_check = merge(initial_data_check_wave,
+                               (potential = potential_check, mode = mode))
     if check_initial_data && !initial_data_check_wave.consistent
-        throw(
-            ArgumentError(
-                "Initial data inconsistent with constraints: " *
-                    "origin_residual=$(initial_data_check_wave.origin_residual), " *
-                    "boundary_residual=$(initial_data_check_wave.boundary_residual), " *
-                    "tol=$(initial_data_check_wave.tol)"
-            )
-        )
+        throw(ArgumentError("Initial data inconsistent with constraints: " *
+                            "origin_residual=$(initial_data_check_wave.origin_residual), " *
+                            "boundary_residual=$(initial_data_check_wave.boundary_residual), " *
+                            "tol=$(initial_data_check_wave.tol)"))
     end
     if check_initial_data && mode === :potential && !potential_check.residual_ok
-        throw(
-            ArgumentError(
-                "Potential initial data failed consistency check: " *
-                    "residual_l2_abs=$(potential_check.residual_l2_abs), " *
-                    "residual_l2_rel=$(potential_check.residual_l2_rel), " *
-                    "tol=$(potential_check.tol)"
-            )
-        )
+        throw(ArgumentError("Potential initial data failed consistency check: " *
+                            "residual_l2_abs=$(potential_check.residual_l2_abs), " *
+                            "residual_l2_rel=$(potential_check.residual_l2_rel), " *
+                            "tol=$(potential_check.tol)"))
     end
 
     dt_raw = dt === nothing ?
-        estimate_wave_timestep(ops; alg = alg, safety_factor = safety_factor) :
-        Float64(dt)
+             estimate_wave_timestep(ops;
+                                    alg = alg,
+                                    safety_factor = safety_factor,
+                                    boundary_condition = bc_norm,
+                                    enforce_origin = enforce_origin_effective,
+                                    stability_tol = stability_tol) :
+             Float64(dt)
     dt_raw > 0 || throw(ArgumentError("`dt` must be positive."))
     stability_tol > 0 || throw(ArgumentError("`stability_tol` must be positive."))
     noise_amplitude >= 0 || throw(ArgumentError("`noise_amplitude` must be nonnegative."))
@@ -517,306 +606,283 @@ function solve_wave_ode(
     dt_step = Float64(T_final) / nsteps
     saveat = _build_saveat(dt_step, nsteps, save_every)
 
-    params = WaveODEParams(
-        ops;
-        boundary_condition = bc_norm,
-        enforce_origin = enforce_origin_effective
-    )
+    rhs_ops = operator_backend === :kernel ? wave_kernel_operators(ops; target_eltype = Float64) : ops
+    params = WaveODEParams(rhs_ops;
+                           boundary_condition = bc_norm,
+                           enforce_origin = enforce_origin_effective)
 
     dt_stability = nothing
     if dt !== nothing && check_provided_dt_stability
-        dt_stability = _check_provided_dt_stability(
-            ops,
-            dt_step,
-            alg;
-            boundary_condition = bc_norm,
-            enforce_origin = enforce_origin_effective,
-            stability_tol = Float64(stability_tol)
-        )
+        dt_stability = _check_provided_dt_stability(ops,
+                                                    dt_step,
+                                                    alg;
+                                                    boundary_condition = bc_norm,
+                                                    enforce_origin = enforce_origin_effective,
+                                                    stability_tol = Float64(stability_tol))
     end
 
-    noise_cb = _step_noise_callback(
-        noise_amplitude,
-        n,
-        state_layout,
-        enforce_origin_effective,
-        has_origin_node;
-        noise_seed = noise_seed
-    )
+    if verbose
+        _print_wave_presolve_diagnostics(ops,
+                                         alg,
+                                         bc_norm,
+                                         mode,
+                                         state_layout,
+                                         r,
+                                         T_final,
+                                         dt_raw,
+                                         dt_step,
+                                         nsteps,
+                                         save_every,
+                                         enforce_origin_effective,
+                                         merge(initial_data_check,
+                                               (pi = pi_init, psi = psi_init)),
+                                         noise_amplitude,
+                                         noise_seed,
+                                         dt_stability)
+    end
 
-    sol = if state_layout === :vector
-        U0_vec = vcat(pi_init, xi_init)
+    noise_cb = _step_noise_callback(noise_amplitude,
+                                    n,
+                                    state_layout,
+                                    enforce_origin_effective,
+                                    has_origin_node;
+                                    noise_seed = noise_seed)
+
+    nsave = length(saveat)
+    Π_hist = Matrix{Float64}(undef, n, nsave)
+    Ψ_hist = Matrix{Float64}(undef, n, nsave)
+    energy = Vector{Float64}(undef, nsave)
+    t_hist = copy(saveat)
+
+    function store_snapshot!(slot::Int, U)
+        if state_layout === :vector
+            Πk = @view U[1:n]
+            Ψk = @view U[(n + 1):(2 * n)]
+            Π_hist[:, slot] .= Πk
+            Ψ_hist[:, slot] .= Ψk
+            energy[slot] = Float64(wave_energy(ops, Πk, Ψk))
+        else
+            Πk = @view U[:, 1]
+            Ψk = @view U[:, 2]
+            Π_hist[:, slot] .= Πk
+            Ψ_hist[:, slot] .= Ψk
+            energy[slot] = Float64(wave_energy(ops, Πk, Ψk))
+        end
+        return nothing
+    end
+
+    integrator = if state_layout === :vector
+        U0_vec = vcat(pi_init, psi_init)
         if alg isa ImplicitMidpoint
             Jproto = wave_system_jac_prototype(ops; boundary_condition = bc_norm)
-            f = ODEFunction(wave_system_ode_vec!; jac = wave_system_jac!, jac_prototype = Jproto)
+            f = ODEFunction(wave_system_ode_vec!; jac = wave_system_jac!,
+                            jac_prototype = Jproto)
             prob = ODEProblem(f, U0_vec, (0.0, Float64(T_final)), params)
             if noise_cb === nothing
-                solve(
-                    prob,
-                    ImplicitMidpoint(concrete_jac = true, linsolve = KLUFactorization());
-                    dt = dt_step,
-                    adaptive = false,
-                    saveat = saveat,
-                    save_start = true,
-                    dense = false
-                )
+                init(prob,
+                     ImplicitMidpoint(concrete_jac = true, linsolve = KLUFactorization());
+                     dt = dt_step,
+                     adaptive = false,
+                     save_everystep = false,
+                     save_start = false,
+                     dense = false)
             else
-                solve(
-                    prob,
-                    ImplicitMidpoint(concrete_jac = true, linsolve = KLUFactorization());
-                    dt = dt_step,
-                    adaptive = false,
-                    saveat = saveat,
-                    save_start = true,
-                    dense = false,
-                    callback = noise_cb
-                )
+                init(prob,
+                     ImplicitMidpoint(concrete_jac = true, linsolve = KLUFactorization());
+                     dt = dt_step,
+                     adaptive = false,
+                     save_everystep = false,
+                     save_start = false,
+                     dense = false,
+                     callback = noise_cb)
             end
         else
             prob = ODEProblem(wave_system_ode_vec!, U0_vec, (0.0, Float64(T_final)), params)
             if noise_cb === nothing
-                solve(
-                    prob, alg;
-                    dt = dt_step,
-                    adaptive = false,
-                    saveat = saveat,
-                    save_start = true,
-                    dense = false
-                )
+                init(prob, alg;
+                     dt = dt_step,
+                     adaptive = false,
+                     save_everystep = false,
+                     save_start = false,
+                     dense = false)
             else
-                solve(
-                    prob, alg;
-                    dt = dt_step,
-                    adaptive = false,
-                    saveat = saveat,
-                    save_start = true,
-                    dense = false,
-                    callback = noise_cb
-                )
+                init(prob, alg;
+                     dt = dt_step,
+                     adaptive = false,
+                     save_everystep = false,
+                     save_start = false,
+                     dense = false,
+                     callback = noise_cb)
             end
         end
     else
-        U0_mat = hcat(pi_init, xi_init)
+        U0_mat = hcat(pi_init, psi_init)
         prob = ODEProblem(wave_system_ode!, U0_mat, (0.0, Float64(T_final)), params)
         if noise_cb === nothing
-            solve(
-                prob, alg;
-                dt = dt_step,
-                adaptive = false,
-                saveat = saveat,
-                save_start = true,
-                dense = false
-            )
+            init(prob, alg;
+                 dt = dt_step,
+                 adaptive = false,
+                 save_everystep = false,
+                 save_start = false,
+                 dense = false)
         else
-            solve(
-                prob, alg;
-                dt = dt_step,
-                adaptive = false,
-                saveat = saveat,
-                save_start = true,
-                dense = false,
-                callback = noise_cb
-            )
+            init(prob, alg;
+                 dt = dt_step,
+                 adaptive = false,
+                 save_everystep = false,
+                 save_start = false,
+                 dense = false,
+                 callback = noise_cb)
         end
     end
 
-    nsave = length(sol.t)
-    Π_hist = Matrix{Float64}(undef, n, nsave)
-    Ξ_hist = Matrix{Float64}(undef, n, nsave)
-    energy = Vector{Float64}(undef, nsave)
-
-    if state_layout === :vector
-        for k in 1:nsave
-            Uk = sol.u[k]
-            Πk = @view Uk[1:n]
-            Ξk = @view Uk[(n + 1):(2 * n)]
-            Π_hist[:, k] .= Πk
-            Ξ_hist[:, k] .= Ξk
-            energy[k] = Float64(wave_energy(ops, Πk, Ξk))
-        end
-    else
-        for k in 1:nsave
-            Uk = sol.u[k]
-            Πk = @view Uk[:, 1]
-            Ξk = @view Uk[:, 2]
-            Π_hist[:, k] .= Πk
-            Ξ_hist[:, k] .= Ξk
-            energy[k] = Float64(wave_energy(ops, Πk, Ξk))
+    store_snapshot!(1, integrator.u)
+    save_slot = 2
+    for step_idx in 1:nsteps
+        step!(integrator)
+        if step_idx % save_every == 0 || step_idx == nsteps
+            store_snapshot!(save_slot, integrator.u)
+            save_slot += 1
         end
     end
-
-    t_hist = Float64.(sol.t)
+    save_slot == nsave + 1 ||
+        throw(ErrorException("Internal save bookkeeping mismatch: expected $(nsave) snapshots, recorded $(save_slot - 1)."))
+    successful_retcode(integrator.sol) ||
+        throw(ErrorException("Wave solve failed with retcode $(integrator.sol.retcode)."))
 
     if verbose
         println("Wave solve completed: n=$(n), steps=$(nsteps), dt=$(dt_step), saved=$(nsave), bc=$(bc_norm), layout=$(state_layout)")
         println("  initial_data_mode = ", mode)
-        println(
-            "  potential residual ||Geven*phi_hat - Xi||₂ = ",
-            initial_data_check.potential.residual_l2_abs, " (rel ",
-            initial_data_check.potential.residual_l2_rel, ")"
-        )
-        println("  max|Geven*Pi0| = ", initial_data_check.potential.max_abs_GPi)
-        if initial_data_check.potential.xi_growth_expected_from_pi
+        println("  potential residual ||Geven*Φ̂ - Ψ||₂ = ",
+                initial_data_check.potential.residual_l2_abs, " (rel ",
+                initial_data_check.potential.residual_l2_rel, ")")
+        println("  max|Geven*Π0| = ", initial_data_check.potential.max_abs_GPi)
+        if initial_data_check.potential.psi_growth_expected_from_pi
             println("  note: ", initial_data_check.potential.growth_explanation)
         end
         for msg in initial_data_check.potential.warnings
             println("  warning: ", msg)
         end
         if dt_stability !== nothing
-            println(
-                "  dt spectral stability check: max|R(dt*λ)| = ",
-                dt_stability.max_amplification,
-                ", ρ(L) = ", dt_stability.spectral_radius,
-                ", max Re(λ) = ", dt_stability.max_real_eigenvalue
-            )
+            println("  dt spectral stability check: max|R(dt*λ)| = ",
+                    dt_stability.max_amplification,
+                    ", ρ(L) = ", dt_stability.spectral_radius,
+                    ", max |Im(λ)| = ", dt_stability.max_abs_imag_eigenvalue,
+                    ", max Re(λ) = ", dt_stability.max_real_eigenvalue,
+                    ", worst dt*λ = ", dt_stability.worst_scaled_eigenvalue)
         end
         if noise_amplitude > 0
-            println(
-                "  additive step noise amplitude = ", noise_amplitude,
-                ", noise seed = ", noise_seed === nothing ? "auto" : string(noise_seed)
-            )
+            println("  additive step noise amplitude = ", noise_amplitude,
+                    ", noise seed = ", noise_seed === nothing ? "auto" : string(noise_seed))
         end
     end
 
-    return WaveEvolutionResult(
-        t_hist,
-        Π_hist,
-        Ξ_hist,
-        energy,
-        r,
-        dt_step,
-        nsteps,
-        bc_norm,
-        initial_data_check
-    )
+    return WaveEvolutionResult(t_hist,
+                               Π_hist,
+                               Ψ_hist,
+                               energy,
+                               r,
+                               dt_step,
+                               nsteps,
+                               bc_norm,
+                               initial_data_check)
 end
 
 const solve_wave = solve_wave_ode
 
 function _energy_behavior(sol::WaveEvolutionResult)
     dE = diff(sol.energy)
-    return (
-        E0 = sol.energy[1],
-        Ef = sol.energy[end],
-        Ef_over_E0 = sol.energy[end] / sol.energy[1],
-        max_step_increase = isempty(dE) ? NaN : maximum(dE),
-        max_step_decrease = isempty(dE) ? NaN : minimum(dE),
-    )
+    return (E0 = sol.energy[1],
+            Ef = sol.energy[end],
+            Ef_over_E0 = sol.energy[end] / sol.energy[1],
+            max_step_increase = isempty(dE) ? NaN : maximum(dE),
+            max_step_decrease = isempty(dE) ? NaN : minimum(dE))
 end
 
 """
     benchmark_wave_integrators(ops; kwargs...)
 
-Run a microbenchmark of `RK4()` vs `ImplicitMidpoint()` at the same fixed `dt` and
+Run a microbenchmark of `TsitPap8()` vs `ImplicitMidpoint()` at the same fixed `dt` and
 report runtime and energy behavior summaries.
 """
-function benchmark_wave_integrators(
-        ops::WaveOperators;
-        T_final::Real,
-        dt::Real,
-        boundary_condition::Symbol = :reflecting,
-        phi0 = nothing,
-        pi0 = nothing,
-        xi0 = nothing,
-        save_every::Int = 1,
-        enforce_origin::Bool = true,
-        check_initial_data::Bool = true,
-        initial_data_tol = nothing,
-        warmup::Bool = true,
-        verbose::Bool = true,
-        kwargs...
-    )
+function benchmark_wave_integrators(ops::WaveOperators;
+                                    T_final::Real,
+                                    dt::Real,
+                                    boundary_condition::Symbol = :reflecting,
+                                    phi0 = nothing,
+                                    pi0 = nothing,
+                                    psi0 = nothing,
+                                    save_every::Int = 1,
+                                    enforce_origin::Bool = true,
+                                    check_initial_data::Bool = true,
+                                    initial_data_tol = nothing,
+                                    warmup::Bool = true,
+                                    verbose::Bool = true)
     T_final > 0 || throw(ArgumentError("`T_final` must be positive."))
     dt > 0 || throw(ArgumentError("`dt` must be positive."))
 
-    legacy = _extract_legacy_initial_data_kwargs(kwargs)
-    phi0_data = _pick_keyword(phi0, legacy.legacy_phi0, "phi0", "ϕ0")
-    pi0_data = _pick_keyword(pi0, legacy.legacy_pi0, "pi0", "Π0")
-    xi0_data = _pick_keyword(xi0, legacy.legacy_xi0, "xi0", "Ξ0")
-
-    common = (
-        T_final = T_final,
-        dt = dt,
-        boundary_condition = boundary_condition,
-        phi0 = phi0_data,
-        pi0 = pi0_data,
-        xi0 = xi0_data,
-        save_every = save_every,
-        enforce_origin = enforce_origin,
-        check_initial_data = check_initial_data,
-        initial_data_tol = initial_data_tol,
-        verbose = false,
-    )
+    common = (T_final = T_final,
+              dt = dt,
+              boundary_condition = boundary_condition,
+              phi0 = phi0,
+              pi0 = pi0,
+              psi0 = psi0,
+              save_every = save_every,
+              enforce_origin = enforce_origin,
+              check_initial_data = check_initial_data,
+              initial_data_tol = initial_data_tol,
+              verbose = false)
 
     if warmup
-        solve_wave_ode(
-            ops; common..., T_final = min(T_final, dt), alg = RK4(), state_layout = :matrix
-        )
-        solve_wave_ode(
-            ops; common..., T_final = min(T_final, dt),
-            alg = ImplicitMidpoint(), state_layout = :vector
-        )
+        solve_wave_ode(ops; common..., T_final = min(T_final, dt), alg = TsitPap8(),
+                       state_layout = :matrix)
+        solve_wave_ode(ops; common..., T_final = min(T_final, dt),
+                       alg = ImplicitMidpoint(), state_layout = :vector)
     end
 
-    elapsed_rk4 = @elapsed sol_rk4 = solve_wave_ode(
-        ops;
-        common...,
-        alg = RK4(),
-        state_layout = :matrix
-    )
-    elapsed_implicit = @elapsed sol_implicit = solve_wave_ode(
-        ops;
-        common...,
-        alg = ImplicitMidpoint(),
-        state_layout = :vector
-    )
+    elapsed_tsitpap8 = @elapsed sol_tsitpap8 = solve_wave_ode(ops;
+                                                              common...,
+                                                              alg = TsitPap8(),
+                                                              state_layout = :matrix)
+    elapsed_implicit = @elapsed sol_implicit = solve_wave_ode(ops;
+                                                              common...,
+                                                              alg = ImplicitMidpoint(),
+                                                              state_layout = :vector)
 
-    rk4_energy = _energy_behavior(sol_rk4)
+    tsitpap8_energy = _energy_behavior(sol_tsitpap8)
     implicit_energy = _energy_behavior(sol_implicit)
 
-    report = (
-        config = (
-            T_final = Float64(T_final),
-            dt = Float64(dt),
-            boundary_condition = _normalize_boundary_condition(boundary_condition),
-            n = length(ops.r),
-        ),
-        rk4 = (
-            elapsed_seconds = elapsed_rk4,
-            nsteps = sol_rk4.nsteps,
-            energy = rk4_energy,
-        ),
-        implicit_midpoint = (
-            elapsed_seconds = elapsed_implicit,
-            nsteps = sol_implicit.nsteps,
-            energy = implicit_energy,
-        ),
-        speedup_rk4_over_implicit = elapsed_implicit > 0 ? elapsed_rk4 / elapsed_implicit :
-            NaN,
-    )
+    report = (config = (T_final = Float64(T_final),
+                        dt = Float64(dt),
+                        boundary_condition = _normalize_boundary_condition(boundary_condition),
+                        n = length(ops.r)),
+              tsitpap8 = (elapsed_seconds = elapsed_tsitpap8,
+                          nsteps = sol_tsitpap8.nsteps,
+                          energy = tsitpap8_energy),
+              implicit_midpoint = (elapsed_seconds = elapsed_implicit,
+                                   nsteps = sol_implicit.nsteps,
+                                   energy = implicit_energy),
+              speedup_tsitpap8_over_implicit = elapsed_implicit > 0 ?
+                                               elapsed_tsitpap8 / elapsed_implicit :
+                                               NaN)
 
     if verbose
         println("Integrator microbenchmark")
-        println(
-            "  config: n=", report.config.n, ", dt=", report.config.dt,
-            ", T_final=", report.config.T_final, ", bc=", report.config.boundary_condition
-        )
-        println("  RK4")
-        println("    elapsed = ", report.rk4.elapsed_seconds, " s, steps = ", report.rk4.nsteps)
-        println(
-            "    E_final/E0 = ", report.rk4.energy.Ef_over_E0,
-            ", max ΔE(step) = ", report.rk4.energy.max_step_increase
-        )
+        println("  config: n=", report.config.n, ", dt=", report.config.dt,
+                ", T_final=", report.config.T_final, ", bc=",
+                report.config.boundary_condition)
+        println("  TsitPap8")
+        println("    elapsed = ", report.tsitpap8.elapsed_seconds, " s, steps = ",
+                report.tsitpap8.nsteps)
+        println("    E_final/E0 = ", report.tsitpap8.energy.Ef_over_E0,
+                ", max ΔE(step) = ", report.tsitpap8.energy.max_step_increase)
         println("  ImplicitMidpoint(concrete_jac=true, linsolve=KLUFactorization())")
-        println(
-            "    elapsed = ", report.implicit_midpoint.elapsed_seconds,
-            " s, steps = ", report.implicit_midpoint.nsteps
-        )
-        println(
-            "    E_final/E0 = ", report.implicit_midpoint.energy.Ef_over_E0,
-            ", max ΔE(step) = ", report.implicit_midpoint.energy.max_step_increase
-        )
-        println("  elapsed ratio RK4/Implicit = ", report.speedup_rk4_over_implicit)
+        println("    elapsed = ", report.implicit_midpoint.elapsed_seconds,
+                " s, steps = ", report.implicit_midpoint.nsteps)
+        println("    E_final/E0 = ", report.implicit_midpoint.energy.Ef_over_E0,
+                ", max ΔE(step) = ", report.implicit_midpoint.energy.max_step_increase)
+        println("  elapsed ratio TsitPap8/Implicit = ",
+                report.speedup_tsitpap8_over_implicit)
     end
 
     return report
@@ -850,7 +916,6 @@ function _maxabs_matrix_with_arg(A::AbstractMatrix{<:Real})
     bi = 1
     bj = 1
     for j in axes(A, 2), i in axes(A, 1)
-
         av = abs(Float64(A[i, j]))
         if av > best
             best = av
@@ -866,11 +931,11 @@ function _decode_block_index(idx::Int, n::Int, r::Vector{Float64})
         return (field = :Pi, block_index = idx, r_index = idx, r = r[idx])
     end
     ridx = idx - n
-    return (field = :Xi, block_index = idx, r_index = ridx, r = r[ridx])
+    return (field = :Psi, block_index = idx, r_index = ridx, r = r[ridx])
 end
 
-function _energy_phys(ops::WaveOperators, Pi::AbstractVector, Xi::AbstractVector)
-    return wave_energy(ops, Pi, Xi)
+function _energy_phys(ops::WaveOperators, Pi::AbstractVector, Psi::AbstractVector)
+    return wave_energy(ops, Pi, Psi)
 end
 
 function _estimate_initial_profile_metrics(r::Vector{Float64}, Pi0::Vector{Float64})
@@ -885,49 +950,41 @@ function _estimate_initial_profile_metrics(r::Vector{Float64}, Pi0::Vector{Float
     k_proxy = _maxabs_vec(diff(Pi0)) / max(amp * dx, 1.0e-14)
     hf_ratio = k_proxy / max(nyquist, 1.0e-14)
     high_freq = hf_ratio > 0.25
-    return (
-        amplitude = amp,
-        center_estimate = center_est,
-        width_estimate = width_est,
-        dx = dx,
-        nyquist = nyquist,
-        k_proxy = k_proxy,
-        high_frequency_ratio = hf_ratio,
-        high_frequency = high_freq,
-    )
+    return (amplitude = amp,
+            center_estimate = center_est,
+            width_estimate = width_est,
+            dx = dx,
+            nyquist = nyquist,
+            k_proxy = k_proxy,
+            high_frequency_ratio = hf_ratio,
+            high_frequency = high_freq)
 end
 
-function _run_wave_case_with_monitor(
-        ops::WaveOperators,
-        Pi_seed::Vector{Float64},
-        Xi_seed::Vector{Float64};
-        T_final::Real,
-        dt,
-        alg,
-        adaptive::Bool,
-        reltol::Real,
-        abstol::Real,
-        save_every::Int,
-        enforce_origin::Bool
-    )
+function _run_wave_case_with_monitor(ops::WaveOperators,
+                                     Pi_seed::Vector{Float64},
+                                     Psi_seed::Vector{Float64};
+                                     T_final::Real,
+                                     dt,
+                                     alg,
+                                     adaptive::Bool,
+                                     reltol::Real,
+                                     abstol::Real,
+                                     save_every::Int,
+                                     enforce_origin::Bool)
     has_origin_node = _has_origin_node(ops)
     enforce_origin_effective = _resolve_enforce_origin(ops, enforce_origin)
     Pi0 = copy(Pi_seed)
-    Xi0 = copy(Xi_seed)
-    initialize_wave_state!(
-        Pi0,
-        Xi0;
-        enforce_origin = enforce_origin_effective,
-        has_origin_node = has_origin_node
-    )
-    xi1_after_init = has_origin_node ? Xi0[1] : NaN
+    Psi0 = copy(Psi_seed)
+    initialize_wave_state!(Pi0,
+                           Psi0;
+                           enforce_origin = enforce_origin_effective,
+                           has_origin_node = has_origin_node)
+    xi1_after_init = has_origin_node ? Psi0[1] : NaN
 
-    params = WaveODEParams(
-        ops;
-        boundary_condition = :reflecting,
-        enforce_origin = enforce_origin_effective
-    )
-    U0 = hcat(Pi0, Xi0)
+    params = WaveODEParams(ops;
+                           boundary_condition = :reflecting,
+                           enforce_origin = enforce_origin_effective)
+    U0 = hcat(Pi0, Psi0)
 
     rhs_evals = Ref(0)
     max_abs_dxi1 = Ref(0.0)
@@ -945,96 +1002,85 @@ function _run_wave_case_with_monitor(
 
     prob = ODEProblem(rhs_wrapped!, U0, (0.0, Float64(T_final)), params)
     dt_used = dt === nothing ? estimate_wave_timestep(ops; alg = alg, safety_factor = 0.9) :
-        Float64(dt)
+              Float64(dt)
     dt_stability = nothing
 
     if adaptive
-        sol = solve(
-            prob, alg;
-            adaptive = true,
-            reltol = Float64(reltol),
-            abstol = Float64(abstol),
-            save_start = true
-        )
+        sol = solve(prob, alg;
+                    adaptive = true,
+                    reltol = Float64(reltol),
+                    abstol = Float64(abstol),
+                    save_start = true)
         t_hist = Float64.(sol.t)
         dt_internal = length(t_hist) >= 2 ? diff(t_hist) : Float64[]
-        dt_info = (
-            adaptive = true,
-            dt_requested = dt,
-            dt_min = isempty(dt_internal) ? NaN : minimum(dt_internal),
-            dt_max = isempty(dt_internal) ? NaN : maximum(dt_internal),
-            dt_mean = isempty(dt_internal) ? NaN : sum(dt_internal) / length(dt_internal),
-            reltol = Float64(reltol),
-            abstol = Float64(abstol),
-        )
+        dt_info = (adaptive = true,
+                   dt_requested = dt,
+                   dt_min = isempty(dt_internal) ? NaN : minimum(dt_internal),
+                   dt_max = isempty(dt_internal) ? NaN : maximum(dt_internal),
+                   dt_mean = isempty(dt_internal) ? NaN :
+                             sum(dt_internal) / length(dt_internal),
+                   reltol = Float64(reltol),
+                   abstol = Float64(abstol))
     else
         nsteps = max(1, ceil(Int, Float64(T_final) / dt_used))
         dt_step = Float64(T_final) / nsteps
         if dt !== nothing
-            dt_stability = _check_provided_dt_stability(
-                ops,
-                dt_step,
-                alg;
-                boundary_condition = :reflecting,
-                enforce_origin = enforce_origin_effective,
-                stability_tol = 1.0e-6,
-                throw_on_failure = false
-            )
+            dt_stability = _check_provided_dt_stability(ops,
+                                                        dt_step,
+                                                        alg;
+                                                        boundary_condition = :reflecting,
+                                                        enforce_origin = enforce_origin_effective,
+                                                        stability_tol = 1.0e-6,
+                                                        throw_on_failure = false)
         end
         saveat = _build_saveat(dt_step, nsteps, save_every)
-        sol = solve(
-            prob, alg;
-            dt = dt_step,
-            adaptive = false,
-            saveat = saveat,
-            save_start = true,
-            dense = false
-        )
+        sol = solve(prob, alg;
+                    dt = dt_step,
+                    adaptive = false,
+                    saveat = saveat,
+                    save_start = true,
+                    dense = false)
         t_hist = Float64.(sol.t)
-        dt_info = (
-            adaptive = false,
-            dt_requested = dt,
-            dt_used = dt_step,
-            dt_stability = dt_stability,
-            reltol = NaN,
-            abstol = NaN,
-        )
+        dt_info = (adaptive = false,
+                   dt_requested = dt,
+                   dt_used = dt_step,
+                   dt_stability = dt_stability,
+                   reltol = NaN,
+                   abstol = NaN)
     end
 
     nsave = length(sol.t)
     n = length(ops.r)
     Pi_hist = Matrix{Float64}(undef, n, nsave)
-    Xi_hist = Matrix{Float64}(undef, n, nsave)
+    Psi_hist = Matrix{Float64}(undef, n, nsave)
     E = Vector{Float64}(undef, nsave)
     Ephys = Vector{Float64}(undef, nsave)
 
     for k in 1:nsave
         Uk = sol.u[k]
         Pik = @view Uk[:, 1]
-        Xik = @view Uk[:, 2]
+        Psik = @view Uk[:, 2]
         Pi_hist[:, k] .= Pik
-        Xi_hist[:, k] .= Xik
-        E[k] = Float64(wave_energy(ops, Pik, Xik))
-        Ephys[k] = Float64(_energy_phys(ops, Pik, Xik))
+        Psi_hist[:, k] .= Psik
+        E[k] = Float64(wave_energy(ops, Pik, Psik))
+        Ephys[k] = Float64(_energy_phys(ops, Pik, Psik))
     end
 
-    xi1 = Xi_hist[1, :]
-    xi1_max = _maxabs_vec(xi1)
-    xi1_exact_zero = all(==(0.0), xi1)
+    psi1 = Psi_hist[1, :]
+    xi1_max = _maxabs_vec(psi1)
+    xi1_exact_zero = all(==(0.0), psi1)
 
-    return (
-        t = t_hist,
-        Pi = Pi_hist,
-        Xi = Xi_hist,
-        E = E,
-        Ephys = Ephys,
-        dt_info = dt_info,
-        rhs_evals = rhs_evals[],
-        max_abs_dxi1 = max_abs_dxi1[],
-        xi1_after_init = xi1_after_init,
-        xi1_max = xi1_max,
-        xi1_exact_zero = xi1_exact_zero,
-    )
+    return (t = t_hist,
+            Pi = Pi_hist,
+            Psi = Psi_hist,
+            E = E,
+            Ephys = Ephys,
+            dt_info = dt_info,
+            rhs_evals = rhs_evals[],
+            max_abs_dxi1 = max_abs_dxi1[],
+            xi1_after_init = xi1_after_init,
+            xi1_max = xi1_max,
+            xi1_exact_zero = xi1_exact_zero)
 end
 
 function _first_steps_energy_table(t::Vector{Float64}, E::Vector{Float64}; nshow::Int = 20)
@@ -1049,70 +1095,58 @@ end
 
 function _early_delta_metrics(t::Vector{Float64}, E::Vector{Float64}, K::Int)
     if length(E) < 2
-        return (
-            K_used = 0,
-            dE = Float64[],
-            max_dE = NaN,
-            max_abs_dE = NaN,
-            min_dE = NaN,
-            argmax_dE = 0,
-            t_at_argmax_dE = NaN,
-        )
+        return (K_used = 0,
+                dE = Float64[],
+                max_dE = NaN,
+                max_abs_dE = NaN,
+                min_dE = NaN,
+                argmax_dE = 0,
+                t_at_argmax_dE = NaN)
     end
     dE = diff(E)
     K_used = min(K, length(dE))
     dEk = dE[1:K_used]
     max_dE, arg = findmax(dEk)
-    return (
-        K_used = K_used,
-        dE = dEk,
-        max_dE = max_dE,
-        max_abs_dE = _maxabs_vec(dEk),
-        min_dE = minimum(dEk),
-        argmax_dE = arg,
-        t_at_argmax_dE = t[arg],
-    )
+    return (K_used = K_used,
+            dE = dEk,
+            max_dE = max_dE,
+            max_abs_dE = _maxabs_vec(dEk),
+            min_dE = minimum(dEk),
+            argmax_dE = arg,
+            t_at_argmax_dE = t[arg])
 end
 
-function _dt_halving_study(
-        ops::WaveOperators,
-        Pi0::Vector{Float64},
-        Xi0::Vector{Float64};
-        T_final::Real,
-        dt::Real,
-        alg,
-        save_every::Int,
-        enforce_origin::Bool,
-        K::Int
-    )
+function _dt_halving_study(ops::WaveOperators,
+                           Pi0::Vector{Float64},
+                           Psi0::Vector{Float64};
+                           T_final::Real,
+                           dt::Real,
+                           alg,
+                           save_every::Int,
+                           enforce_origin::Bool,
+                           K::Int)
     dts = (Float64(dt), Float64(dt) / 2, Float64(dt) / 4)
     metrics = NamedTuple[]
     maxabs_vals = Float64[]
     for dti in dts
-        run = _run_wave_case_with_monitor(
-            ops,
-            Pi0,
-            Xi0;
-            T_final = T_final,
-            dt = dti,
-            alg = alg,
-            adaptive = false,
-            reltol = 1.0e-9,
-            abstol = 1.0e-12,
-            save_every = save_every,
-            enforce_origin = enforce_origin
-        )
+        run = _run_wave_case_with_monitor(ops,
+                                          Pi0,
+                                          Psi0;
+                                          T_final = T_final,
+                                          dt = dti,
+                                          alg = alg,
+                                          adaptive = false,
+                                          reltol = 1.0e-9,
+                                          abstol = 1.0e-12,
+                                          save_every = save_every,
+                                          enforce_origin = enforce_origin)
         early = _early_delta_metrics(run.t, run.E, K)
-        push!(
-            metrics,
-            (
-                dt = dti,
-                max_abs_dE = early.max_abs_dE,
-                max_dE = early.max_dE,
-                min_dE = early.min_dE,
-                K_used = early.K_used,
-            )
-        )
+        push!(metrics,
+              (dt = dti,
+               max_abs_dE = early.max_abs_dE,
+               max_dE = early.max_dE,
+               min_dE = early.min_dE,
+               K_used = early.K_used))
         push!(maxabs_vals, early.max_abs_dE)
     end
 
@@ -1120,82 +1154,69 @@ function _dt_halving_study(
     r2 = maxabs_vals[3] > 0 ? maxabs_vals[2] / maxabs_vals[3] : NaN
     q1 = isfinite(r1) && r1 > 0 ? log2(r1) : NaN
     q2 = isfinite(r2) && r2 > 0 ? log2(r2) : NaN
-    return (
-        mode = :fixed_dt,
-        metrics = metrics,
-        ratio_dt_to_dt2 = r1,
-        ratio_dt2_to_dt4 = r2,
-        q_dt_to_dt2 = q1,
-        q_dt2_to_dt4 = q2,
-    )
+    return (mode = :fixed_dt,
+            metrics = metrics,
+            ratio_dt_to_dt2 = r1,
+            ratio_dt2_to_dt4 = r2,
+            q_dt_to_dt2 = q1,
+            q_dt2_to_dt4 = q2)
 end
 
-function _adaptive_tol_study(
-        ops::WaveOperators,
-        Pi0::Vector{Float64},
-        Xi0::Vector{Float64};
-        T_final::Real,
-        dt,
-        alg,
-        reltol::Real,
-        abstol::Real,
-        save_every::Int,
-        enforce_origin::Bool,
-        K::Int
-    )
-    tolerances = (
-        (Float64(reltol), Float64(abstol)),
-        (Float64(reltol) / 10, Float64(abstol) / 10),
-        (Float64(reltol) / 100, Float64(abstol) / 100),
-    )
+function _adaptive_tol_study(ops::WaveOperators,
+                             Pi0::Vector{Float64},
+                             Psi0::Vector{Float64};
+                             T_final::Real,
+                             dt,
+                             alg,
+                             reltol::Real,
+                             abstol::Real,
+                             save_every::Int,
+                             enforce_origin::Bool,
+                             K::Int)
+    tolerances = ((Float64(reltol), Float64(abstol)),
+                  (Float64(reltol) / 10, Float64(abstol) / 10),
+                  (Float64(reltol) / 100, Float64(abstol) / 100))
     metrics = NamedTuple[]
     maxabs_vals = Float64[]
     for (rt, at) in tolerances
-        run = _run_wave_case_with_monitor(
-            ops,
-            Pi0,
-            Xi0;
-            T_final = T_final,
-            dt = dt,
-            alg = alg,
-            adaptive = true,
-            reltol = rt,
-            abstol = at,
-            save_every = save_every,
-            enforce_origin = enforce_origin
-        )
+        run = _run_wave_case_with_monitor(ops,
+                                          Pi0,
+                                          Psi0;
+                                          T_final = T_final,
+                                          dt = dt,
+                                          alg = alg,
+                                          adaptive = true,
+                                          reltol = rt,
+                                          abstol = at,
+                                          save_every = save_every,
+                                          enforce_origin = enforce_origin)
         early = _early_delta_metrics(run.t, run.E, K)
-        push!(
-            metrics,
-            (
-                reltol = rt,
-                abstol = at,
-                max_abs_dE = early.max_abs_dE,
-                max_dE = early.max_dE,
-                min_dE = early.min_dE,
-                K_used = early.K_used,
-            )
-        )
+        push!(metrics,
+              (reltol = rt,
+               abstol = at,
+               max_abs_dE = early.max_abs_dE,
+               max_dE = early.max_dE,
+               min_dE = early.min_dE,
+               K_used = early.K_used))
         push!(maxabs_vals, early.max_abs_dE)
     end
 
     r1 = maxabs_vals[2] > 0 ? maxabs_vals[1] / maxabs_vals[2] : NaN
     r2 = maxabs_vals[3] > 0 ? maxabs_vals[2] / maxabs_vals[3] : NaN
-    return (
-        mode = :adaptive_tol,
-        metrics = metrics,
-        ratio_tol_to_tol10 = r1,
-        ratio_tol10_to_tol100 = r2,
-    )
+    return (mode = :adaptive_tol,
+            metrics = metrics,
+            ratio_tol_to_tol10 = r1,
+            ratio_tol10_to_tol100 = r2)
 end
 
 function _skew_adjointness_report(ops::WaveOperators; bigfloat_check::Bool)
     n = length(ops.r)
-    H = Matrix{Float64}(ops.H)
+    S = Matrix{Float64}(_wave_scalar_mass(ops))
+    V = Matrix{Float64}(_wave_vector_mass(ops))
     D = Matrix{Float64}(ops.D)
     G = Matrix{Float64}(ops.Geven)
     Z = zeros(Float64, n, n)
-    Hblk = [H Z; Z H]
+    Hblk = [S Z; Z V]
     keep = setdiff(collect(1:(2 * n)), [1, n + 1])
 
     function summarize_S(S::Matrix{Float64})
@@ -1209,19 +1230,14 @@ function _skew_adjointness_report(ops::WaveOperators; bigfloat_check::Bool)
         full_j_desc = _decode_block_index(full.j, n, Float64.(ops.r))
         no_i_desc = _decode_block_index(no_origin_i, n, Float64.(ops.r))
         no_j_desc = _decode_block_index(no_origin_j, n, Float64.(ops.r))
-        return (
-            maxabs_full = full.maxabs,
-            maxabs_rows_2end = rows_2end_max,
-            maxabs_no_origin = no_origin.maxabs,
-            argmax_full = (
-                i = full.i, j = full.j, value = full.value,
-                i_desc = full_i_desc, j_desc = full_j_desc,
-            ),
-            argmax_no_origin = (
-                i = no_origin_i, j = no_origin_j, value = no_origin.value,
-                i_desc = no_i_desc, j_desc = no_j_desc,
-            ),
-        )
+        return (maxabs_full = full.maxabs,
+                maxabs_rows_2end = rows_2end_max,
+                maxabs_no_origin = no_origin.maxabs,
+                argmax_full = (i = full.i, j = full.j, value = full.value,
+                               i_desc = full_i_desc, j_desc = full_j_desc),
+                argmax_no_origin = (i = no_origin_i, j = no_origin_j,
+                                    value = no_origin.value,
+                                    i_desc = no_i_desc, j_desc = no_j_desc))
     end
 
     A_interior = [Z D; G Z]
@@ -1229,12 +1245,12 @@ function _skew_adjointness_report(ops::WaveOperators; bigfloat_check::Bool)
     interior = summarize_S(S_interior)
 
     Sat = zeros(Float64, n, n)
-    Sat[end, end] = -Float64(ops.B[end, end]) / Float64(ops.H[end, end])
-    A_reflecting_sat = [Z D + Sat; G Z]
+    Sat[end, end] = -Float64(ops.B[end, end]) / Float64(_wave_scalar_mass(ops)[end, end])
+    A_reflecting_sat = [Z D+Sat; G Z]
     S_reflecting_sat = transpose(A_reflecting_sat) * Hblk + Hblk * A_reflecting_sat
     reflecting_sat = summarize_S(S_reflecting_sat)
 
-    sbp_residual = H * D + transpose(G) * H - Matrix{Float64}(ops.B)
+    sbp_residual = S * D + transpose(G) * V - Matrix{Float64}(ops.B)
     sbp_full = _maxabs_vec(sbp_residual)
     sbp_no_origin = _maxabs_vec(sbp_residual[2:end, :])
 
@@ -1248,14 +1264,12 @@ function _skew_adjointness_report(ops::WaveOperators; bigfloat_check::Bool)
         (enabled = false, maxabs = NaN)
     end
 
-    return (
-        n = n,
-        interior = interior,
-        reflecting_sat = reflecting_sat,
-        sbp_full = sbp_full,
-        sbp_no_origin = sbp_no_origin,
-        bigfloat = bigfloat_part,
-    )
+    return (n = n,
+            interior = interior,
+            reflecting_sat = reflecting_sat,
+            sbp_full = sbp_full,
+            sbp_no_origin = sbp_no_origin,
+            bigfloat = bigfloat_part)
 end
 
 """
@@ -1269,56 +1283,45 @@ This runs:
 3. semidiscrete skew-adjointness check (`A' Hblk + Hblk A`),
 4. energy-definition comparison (`E` vs `Ephys`),
 5. boundary-hit timing estimate vs bump timing,
-6. parity-enforcement checks (`Xi[1]` and `dXi[1]` instrumentation).
+6. parity-enforcement checks (`Ψ[1]` and `dΨ[1]` instrumentation).
 
 Returns a `NamedTuple` and prints a concise diagnostics summary.
 """
 function diagnose_reflecting_energy_bump(;
-        source = MattssonNordström2004(),
-        accuracy_order::Int = 6,
-        N::Int = 64,
-        R::Real = 1.0,
-        p::Int = 2,
-        mode = FastMode(),
-        build_matrix::Symbol = :matrix_if_square,
-        alg = RK4(),
-        adaptive::Bool = false,
-        dt = nothing,
-        reltol::Real = 1.0e-8,
-        abstol::Real = 1.0e-10,
-        T_final::Real = 2.0,
-        save_every::Int = 1,
-        K::Int = 100,
-        phi0 = nothing,
-        pi0 = nothing,
-        xi0 = nothing,
-        center = nothing,
-        width = nothing,
-        amplitude::Real = 1.0,
-        enforce_origin::Bool = true,
-        bigfloat_check::Bool = false,
-        verbose::Bool = true,
-        kwargs...
-    )
-    ops = spherical_operators(
-        source;
-        accuracy_order = accuracy_order,
-        N = N,
-        R = R,
-        p = p,
-        mode = mode,
-        build_matrix = build_matrix
-    )
+                                         source = MattssonNordström2004(),
+                                         accuracy_order::Int = 6,
+                                         N::Int = 64,
+                                         R::Real = 1.0,
+                                         p::Int = 2,
+                                         mode = FastMode(),
+                                         alg = TsitPap8(),
+                                         adaptive::Bool = false,
+                                         dt = nothing,
+                                         reltol::Real = 1.0e-8,
+                                         abstol::Real = 1.0e-10,
+                                         T_final::Real = 2.0,
+                                         save_every::Int = 1,
+                                         K::Int = 100,
+                                         phi0 = nothing,
+                                         pi0 = nothing,
+                                         psi0 = nothing,
+                                         center = nothing,
+                                         width = nothing,
+                                         amplitude::Real = 1.0,
+                                         enforce_origin::Bool = true,
+                                         bigfloat_check::Bool = false,
+                                         verbose::Bool = true)
+    ops = diagonal_spherical_operators(source;
+                              accuracy_order = accuracy_order,
+                              N = N,
+                              R = R,
+                              p = p,
+                              mode = mode)
     r = Float64.(ops.r)
 
-    legacy = _extract_legacy_initial_data_kwargs(kwargs)
-    phi0_data = _pick_keyword(phi0, legacy.legacy_phi0, "phi0", "ϕ0")
-    pi0_data = _pick_keyword(pi0, legacy.legacy_pi0, "pi0", "Π0")
-    xi0_data = _pick_keyword(xi0, legacy.legacy_xi0, "xi0", "Ξ0")
-
-    Pi_seed = _make_vector_data(pi0_data, r, "pi0")
-    Xi_seed = _make_vector_data(xi0_data, r, "xi0")
-    phi_seed = _make_vector_data(phi0_data, r, "phi0")
+    Pi_seed = _make_vector_data(pi0, r, "pi0")
+    Psi_seed = _make_vector_data(psi0, r, "psi0")
+    phi_seed = _make_vector_data(phi0, r, "phi0")
 
     if Pi_seed === nothing
         if phi_seed !== nothing
@@ -1333,8 +1336,8 @@ function diagnose_reflecting_energy_bump(;
             end
         end
     end
-    if Xi_seed === nothing
-        Xi_seed = zeros(Float64, length(r))
+    if Psi_seed === nothing
+        Psi_seed = zeros(Float64, length(r))
     end
 
     profile = _estimate_initial_profile_metrics(r, Pi_seed)
@@ -1342,52 +1345,46 @@ function diagnose_reflecting_energy_bump(;
     center_for_hit = center === nothing ? peak_center : Float64(center)
     width_for_info = width === nothing ? profile.width_estimate : Float64(width)
 
-    run_main = _run_wave_case_with_monitor(
-        ops,
-        Pi_seed,
-        Xi_seed;
-        T_final = T_final,
-        dt = dt,
-        alg = alg,
-        adaptive = adaptive,
-        reltol = reltol,
-        abstol = abstol,
-        save_every = save_every,
-        enforce_origin = enforce_origin
-    )
+    run_main = _run_wave_case_with_monitor(ops,
+                                           Pi_seed,
+                                           Psi_seed;
+                                           T_final = T_final,
+                                           dt = dt,
+                                           alg = alg,
+                                           adaptive = adaptive,
+                                           reltol = reltol,
+                                           abstol = abstol,
+                                           save_every = save_every,
+                                           enforce_origin = enforce_origin)
 
     early_E = _early_delta_metrics(run_main.t, run_main.E, K)
     early_Ephys = _early_delta_metrics(run_main.t, run_main.Ephys, K)
     first20 = _first_steps_energy_table(run_main.t, run_main.E; nshow = 20)
 
     scaling = if adaptive
-        _adaptive_tol_study(
-            ops,
-            Pi_seed,
-            Xi_seed;
-            T_final = T_final,
-            dt = dt,
-            alg = alg,
-            reltol = reltol,
-            abstol = abstol,
-            save_every = save_every,
-            enforce_origin = enforce_origin,
-            K = K
-        )
+        _adaptive_tol_study(ops,
+                            Pi_seed,
+                            Psi_seed;
+                            T_final = T_final,
+                            dt = dt,
+                            alg = alg,
+                            reltol = reltol,
+                            abstol = abstol,
+                            save_every = save_every,
+                            enforce_origin = enforce_origin,
+                            K = K)
     else
         dt_base = run_main.dt_info.adaptive ? (dt === nothing ? NaN : Float64(dt)) :
-            run_main.dt_info.dt_used
-        _dt_halving_study(
-            ops,
-            Pi_seed,
-            Xi_seed;
-            T_final = T_final,
-            dt = dt_base,
-            alg = alg,
-            save_every = save_every,
-            enforce_origin = enforce_origin,
-            K = K
-        )
+                  run_main.dt_info.dt_used
+        _dt_halving_study(ops,
+                          Pi_seed,
+                          Psi_seed;
+                          T_final = T_final,
+                          dt = dt_base,
+                          alg = alg,
+                          save_every = save_every,
+                          enforce_origin = enforce_origin,
+                          K = K)
     end
 
     skew = _skew_adjointness_report(ops; bigfloat_check = bigfloat_check)
@@ -1396,136 +1393,106 @@ function diagnose_reflecting_energy_bump(;
     bump_time = early_E.t_at_argmax_dE
     bump_pre_boundary = isfinite(t_hit) && isfinite(bump_time) && (bump_time < t_hit)
 
-    parity = (
-        xi1_after_init = run_main.xi1_after_init,
-        xi1_max = run_main.xi1_max,
-        xi1_exact_zero = run_main.xi1_exact_zero,
-        dxi1_max = run_main.max_abs_dxi1,
-        rhs_evals = run_main.rhs_evals,
-        enforce_origin = enforce_origin,
-    )
+    parity = (xi1_after_init = run_main.xi1_after_init,
+              xi1_max = run_main.xi1_max,
+              xi1_exact_zero = run_main.xi1_exact_zero,
+              dxi1_max = run_main.max_abs_dxi1,
+              rhs_evals = run_main.rhs_evals,
+              enforce_origin = enforce_origin)
 
     conclusions = String[]
     if parity.xi1_max > 1.0e-14 || parity.dxi1_max > 1.0e-14
         push!(conclusions, "Parity enforcement bypassed or numerically violated at origin.")
     else
-        push!(conclusions, "Parity enforcement active: Xi[1] and dXi[1] remain at machine zero.")
+        push!(conclusions,
+              "Parity enforcement active: Ψ[1] and dΨ[1] remain at machine zero.")
     end
 
     if skew.reflecting_sat.maxabs_no_origin > 1.0e-10
-        push!(
-            conclusions,
-            "Reflecting-SAT semidiscrete operator is not skew-adjoint away from origin; this can drive true energy drift."
-        )
+        push!(conclusions,
+              "Reflecting-SAT semidiscrete operator is not skew-adjoint away from origin; this can drive true energy drift.")
     else
-        push!(
-            conclusions,
-            "Reflecting-SAT skew-adjointness holds away from origin (no-origin block near machine precision)."
-        )
+        push!(conclusions,
+              "Reflecting-SAT skew-adjointness holds away from origin (no-origin block near machine precision).")
     end
 
     if skew.interior.maxabs_no_origin > 1.0e-8 &&
-            skew.reflecting_sat.maxabs_no_origin <= 1.0e-10
-        push!(
-            conclusions,
-            "Raw interior block has boundary flux (expected); reflecting SAT cancels it in the no-origin block."
-        )
+       skew.reflecting_sat.maxabs_no_origin <= 1.0e-10
+        push!(conclusions,
+              "Raw interior block has boundary flux (expected); reflecting SAT cancels it in the no-origin block.")
     end
 
     if skew.sbp_no_origin <= 1.0e-10 && skew.sbp_full > 1.0e-8
-        push!(
-            conclusions,
-            "Energy defect is dominated by the unconstrained origin row (H[1,1]=0 degeneracy), not outer SAT."
-        )
+        push!(conclusions,
+              "Energy defect is dominated by the unconstrained origin row (H[1,1]=0 degeneracy), not outer SAT.")
     end
 
     if scaling.mode == :fixed_dt && length(scaling.metrics) == 3
         if isfinite(scaling.q_dt_to_dt2) && isfinite(scaling.q_dt2_to_dt4) &&
-                scaling.q_dt_to_dt2 > 1.0 && scaling.q_dt2_to_dt4 > 1.0
-            push!(
-                conclusions,
-                "Integrator-induced energy wobble likely (early-step |ΔE| decreases under dt-halving)."
-            )
+           scaling.q_dt_to_dt2 > 1.0 && scaling.q_dt2_to_dt4 > 1.0
+            push!(conclusions,
+                  "Integrator-induced energy wobble likely (early-step |ΔE| decreases under dt-halving).")
         else
-            push!(
-                conclusions,
-                "Early-step |ΔE| does not strongly improve under dt-halving; inspect semidiscrete structure."
-            )
+            push!(conclusions,
+                  "Early-step |ΔE| does not strongly improve under dt-halving; inspect semidiscrete structure.")
         end
     elseif scaling.mode == :adaptive_tol
         if isfinite(scaling.ratio_tol_to_tol10) && scaling.ratio_tol_to_tol10 > 1.2
-            push!(
-                conclusions,
-                "Integrator/tolerance contribution likely (|ΔE| decreases with tighter tolerances)."
-            )
+            push!(conclusions,
+                  "Integrator/tolerance contribution likely (|ΔE| decreases with tighter tolerances).")
         else
-            push!(
-                conclusions,
-                "Tolerance tightening does not strongly reduce |ΔE|; semidiscrete effects may dominate."
-            )
+            push!(conclusions,
+                  "Tolerance tightening does not strongly reduce |ΔE|; semidiscrete effects may dominate.")
         end
     end
 
     push!(conclusions, "Wave speed is fixed to c=1; E and Ephys coincide.")
 
     if bump_pre_boundary
-        push!(
-            conclusions,
-            "Bump occurs before boundary interaction time; likely interior/origin/integrator, not boundary reflection event."
-        )
+        push!(conclusions,
+              "Bump occurs before boundary interaction time; likely interior/origin/integrator, not boundary reflection event.")
     else
-        push!(conclusions, "Bump timing is not clearly pre-boundary; boundary interaction may contribute.")
+        push!(conclusions,
+              "Bump timing is not clearly pre-boundary; boundary interaction may contribute.")
     end
 
-    integrator = (
-        algorithm = string(typeof(alg)),
-        adaptive = adaptive,
-        dt_info = run_main.dt_info,
-        reltol = adaptive ? Float64(reltol) : NaN,
-        abstol = adaptive ? Float64(abstol) : NaN,
-    )
-    initial_data = (
-        description = "Pi even, Xi odd-compatible; Xi initialized to zero unless provided.",
-        amplitude = profile.amplitude,
-        center_peak = peak_center,
-        center_l1 = profile.center_estimate,
-        center_used_for_hit = center_for_hit,
-        width = width_for_info,
-        high_frequency_ratio = profile.high_frequency_ratio,
-        high_frequency = profile.high_frequency,
-    )
-    boundary_timing = (
-        t_hit_estimate = t_hit,
-        bump_time = bump_time,
-        bump_pre_boundary = bump_pre_boundary,
-    )
-    energy_compare = (
-        max_abs_dE_E = early_E.max_abs_dE,
-        max_abs_dE_Ephys = early_Ephys.max_abs_dE,
-        max_dE_E = early_E.max_dE,
-        max_dE_Ephys = early_Ephys.max_dE,
-        min_dE_E = early_E.min_dE,
-        min_dE_Ephys = early_Ephys.min_dE,
-    )
+    integrator = (algorithm = string(typeof(alg)),
+                  adaptive = adaptive,
+                  dt_info = run_main.dt_info,
+                  reltol = adaptive ? Float64(reltol) : NaN,
+                  abstol = adaptive ? Float64(abstol) : NaN)
+    initial_data = (description = "Π even, Ψ odd-compatible; Ψ initialized to zero unless provided.",
+                    amplitude = profile.amplitude,
+                    center_peak = peak_center,
+                    center_l1 = profile.center_estimate,
+                    center_used_for_hit = center_for_hit,
+                    width = width_for_info,
+                    high_frequency_ratio = profile.high_frequency_ratio,
+                    high_frequency = profile.high_frequency)
+    boundary_timing = (t_hit_estimate = t_hit,
+                       bump_time = bump_time,
+                       bump_pre_boundary = bump_pre_boundary)
+    energy_compare = (max_abs_dE_E = early_E.max_abs_dE,
+                      max_abs_dE_Ephys = early_Ephys.max_abs_dE,
+                      max_dE_E = early_E.max_dE,
+                      max_dE_Ephys = early_Ephys.max_dE,
+                      min_dE_E = early_E.min_dE,
+                      min_dE_Ephys = early_Ephys.min_dE)
 
-    report = (
-        integrator = integrator,
-        initial_data = initial_data,
-        early_energy = (
-            first20 = first20,
-            K_used = early_E.K_used,
-            max_dE = early_E.max_dE,
-            max_abs_dE = early_E.max_abs_dE,
-            min_dE = early_E.min_dE,
-            t_at_max_dE = early_E.t_at_argmax_dE,
-        ),
-        scaling = scaling,
-        skew_adjointness = skew,
-        energy_definition = energy_compare,
-        boundary_timing = boundary_timing,
-        parity = parity,
-        conclusions = conclusions,
-    )
+    report = (integrator = integrator,
+              initial_data = initial_data,
+              early_energy = (first20 = first20,
+                              K_used = early_E.K_used,
+                              max_dE = early_E.max_dE,
+                              max_abs_dE = early_E.max_abs_dE,
+                              min_dE = early_E.min_dE,
+                              t_at_max_dE = early_E.t_at_argmax_dE),
+              scaling = scaling,
+              skew_adjointness = skew,
+              energy_definition = energy_compare,
+              boundary_timing = boundary_timing,
+              parity = parity,
+              conclusions = conclusions)
 
     if verbose
         println("Diagnostics summary")
@@ -1533,27 +1500,22 @@ function diagnose_reflecting_energy_bump(;
         println("    algorithm = ", report.integrator.algorithm)
         println("    adaptive = ", report.integrator.adaptive)
         if report.integrator.adaptive
-            println(
-                "    dt range = [", report.integrator.dt_info.dt_min,
-                ", ", report.integrator.dt_info.dt_max, "]"
-            )
-            println("    reltol/abstol = ", report.integrator.reltol, " / ", report.integrator.abstol)
+            println("    dt range = [", report.integrator.dt_info.dt_min,
+                    ", ", report.integrator.dt_info.dt_max, "]")
+            println("    reltol/abstol = ", report.integrator.reltol,
+                    " / ", report.integrator.abstol)
         else
             println("    fixed dt = ", report.integrator.dt_info.dt_used)
         end
 
         println("  Initial data")
         println("    amplitude = ", report.initial_data.amplitude)
-        println(
-            "    center_peak = ", report.initial_data.center_peak,
-            ", center_l1 = ", report.initial_data.center_l1,
-            ", center_used_for_hit = ", report.initial_data.center_used_for_hit,
-            ", width = ", report.initial_data.width
-        )
-        println(
-            "    high_frequency_ratio = ", report.initial_data.high_frequency_ratio,
-            " (high_frequency = ", report.initial_data.high_frequency, ")"
-        )
+        println("    center_peak = ", report.initial_data.center_peak,
+                ", center_l1 = ", report.initial_data.center_l1,
+                ", center_used_for_hit = ", report.initial_data.center_used_for_hit,
+                ", width = ", report.initial_data.width)
+        println("    high_frequency_ratio = ", report.initial_data.high_frequency_ratio,
+                " (high_frequency = ", report.initial_data.high_frequency, ")")
 
         println("  First 20 energy rows (k, t, E, dE)")
         for row in report.early_energy.first20
@@ -1561,90 +1523,73 @@ function diagnose_reflecting_energy_bump(;
         end
         println("  Early-step bump")
         println("    K_used = ", report.early_energy.K_used)
-        println("    max dE = ", report.early_energy.max_dE, " at t = ", report.early_energy.t_at_max_dE)
-        println(
-            "    max |dE| = ", report.early_energy.max_abs_dE,
-            ", min dE = ", report.early_energy.min_dE
-        )
+        println("    max dE = ", report.early_energy.max_dE,
+                " at t = ", report.early_energy.t_at_max_dE)
+        println("    max |dE| = ", report.early_energy.max_abs_dE,
+                ", min dE = ", report.early_energy.min_dE)
 
         if report.scaling.mode == :fixed_dt
             println("  dt-halving study")
             for row in report.scaling.metrics
-                println(
-                    "    dt=", row.dt, " max|dE|=", row.max_abs_dE,
-                    " max dE=", row.max_dE, " min dE=", row.min_dE
-                )
+                println("    dt=", row.dt, " max|dE|=", row.max_abs_dE,
+                        " max dE=", row.max_dE, " min dE=", row.min_dE)
             end
-            println("    ratios = ", report.scaling.ratio_dt_to_dt2, ", ", report.scaling.ratio_dt2_to_dt4)
-            println("    q estimates = ", report.scaling.q_dt_to_dt2, ", ", report.scaling.q_dt2_to_dt4)
+            println("    ratios = ", report.scaling.ratio_dt_to_dt2,
+                    ", ", report.scaling.ratio_dt2_to_dt4)
+            println("    q estimates = ", report.scaling.q_dt_to_dt2,
+                    ", ", report.scaling.q_dt2_to_dt4)
         else
             println("  tolerance-scaling study")
             for row in report.scaling.metrics
-                println(
-                    "    reltol=", row.reltol, " abstol=",
-                    row.abstol, " max|dE|=", row.max_abs_dE
-                )
+                println("    reltol=", row.reltol, " abstol=",
+                        row.abstol, " max|dE|=", row.max_abs_dE)
             end
-            println(
-                "    ratios = ", report.scaling.ratio_tol_to_tol10,
-                ", ", report.scaling.ratio_tol10_to_tol100
-            )
+            println("    ratios = ", report.scaling.ratio_tol_to_tol10,
+                    ", ", report.scaling.ratio_tol10_to_tol100)
         end
 
         println("  Skew-adjointness")
-        println("    interior A: maxabs(S) = ", report.skew_adjointness.interior.maxabs_full)
-        println(
-            "    interior A: maxabs(S rows 2:end) = ",
-            report.skew_adjointness.interior.maxabs_rows_2end
-        )
-        println("    interior A: maxabs(S no-origin) = ", report.skew_adjointness.interior.maxabs_no_origin)
-        println("    interior A: argmax full = ", report.skew_adjointness.interior.argmax_full)
-        println("    interior A: argmax no-origin = ", report.skew_adjointness.interior.argmax_no_origin)
-        println("    reflecting-SAT A: maxabs(S) = ", report.skew_adjointness.reflecting_sat.maxabs_full)
-        println(
-            "    reflecting-SAT A: maxabs(S rows 2:end) = ",
-            report.skew_adjointness.reflecting_sat.maxabs_rows_2end
-        )
-        println(
-            "    reflecting-SAT A: maxabs(S no-origin) = ",
-            report.skew_adjointness.reflecting_sat.maxabs_no_origin
-        )
-        println("    reflecting-SAT A: argmax full = ", report.skew_adjointness.reflecting_sat.argmax_full)
-        println(
-            "    reflecting-SAT A: argmax no-origin = ",
-            report.skew_adjointness.reflecting_sat.argmax_no_origin
-        )
-        println(
-            "    SBP residual full/no-origin = ", report.skew_adjointness.sbp_full,
-            " / ", report.skew_adjointness.sbp_no_origin
-        )
+        println("    interior A: maxabs(S) = ",
+                report.skew_adjointness.interior.maxabs_full)
+        println("    interior A: maxabs(S rows 2:end) = ",
+                report.skew_adjointness.interior.maxabs_rows_2end)
+        println("    interior A: maxabs(S no-origin) = ",
+                report.skew_adjointness.interior.maxabs_no_origin)
+        println("    interior A: argmax full = ",
+                report.skew_adjointness.interior.argmax_full)
+        println("    interior A: argmax no-origin = ",
+                report.skew_adjointness.interior.argmax_no_origin)
+        println("    reflecting-SAT A: maxabs(S) = ",
+                report.skew_adjointness.reflecting_sat.maxabs_full)
+        println("    reflecting-SAT A: maxabs(S rows 2:end) = ",
+                report.skew_adjointness.reflecting_sat.maxabs_rows_2end)
+        println("    reflecting-SAT A: maxabs(S no-origin) = ",
+                report.skew_adjointness.reflecting_sat.maxabs_no_origin)
+        println("    reflecting-SAT A: argmax full = ",
+                report.skew_adjointness.reflecting_sat.argmax_full)
+        println("    reflecting-SAT A: argmax no-origin = ",
+                report.skew_adjointness.reflecting_sat.argmax_no_origin)
+        println("    SBP residual full/no-origin = ", report.skew_adjointness.sbp_full,
+                " / ", report.skew_adjointness.sbp_no_origin)
         if report.skew_adjointness.bigfloat.enabled
             println("    BigFloat maxabs(S) = ", report.skew_adjointness.bigfloat.maxabs)
         end
 
         println("  Energy definition")
-        println(
-            "    max|dE| = ", report.energy_definition.max_abs_dE_E,
-            ", max|dEphys| = ", report.energy_definition.max_abs_dE_Ephys
-        )
+        println("    max|dE| = ", report.energy_definition.max_abs_dE_E,
+                ", max|dEphys| = ", report.energy_definition.max_abs_dE_Ephys)
 
         println("  Boundary timing")
-        println(
-            "    t_hit ≈ ", report.boundary_timing.t_hit_estimate,
-            ", bump time = ", report.boundary_timing.bump_time,
-            ", bump_pre_boundary = ", report.boundary_timing.bump_pre_boundary
-        )
+        println("    t_hit ≈ ", report.boundary_timing.t_hit_estimate,
+                ", bump time = ", report.boundary_timing.bump_time,
+                ", bump_pre_boundary = ", report.boundary_timing.bump_pre_boundary)
 
         println("  Parity enforcement")
-        println("    Xi[1] after init = ", report.parity.xi1_after_init)
-        println(
-            "    max|Xi[1]| = ", report.parity.xi1_max,
-            ", exact_zero_saved = ", report.parity.xi1_exact_zero
-        )
-        println(
-            "    max|dXi[1]| = ", report.parity.dxi1_max,
-            ", rhs_evals = ", report.parity.rhs_evals
-        )
+        println("    Ψ[1] after init = ", report.parity.xi1_after_init)
+        println("    max|Ψ[1]| = ", report.parity.xi1_max,
+                ", exact_zero_saved = ", report.parity.xi1_exact_zero)
+        println("    max|dΨ[1]| = ", report.parity.dxi1_max,
+                ", rhs_evals = ", report.parity.rhs_evals)
 
         println("  Conclusions")
         for cmsg in report.conclusions
@@ -1656,88 +1601,88 @@ function diagnose_reflecting_energy_bump(;
 end
 
 """
-    energy_rate(ops, Π, Ξ, dΠ, dΞ)
+    energy_rate(ops, Π, Ψ, dΠ, dΨ)
 
 Semidiscrete energy rate
 
-`dE/dt = Π' * H * dΠ + Ξ' * H * dΞ`.
+`dE/dt = Π' * S * dΠ + Ψ' * V * dΨ`,
+with the staggered case reducing to the shared `H` norm for both fields.
 """
-function energy_rate(
-        ops::WaveOperators,
-        Π::AbstractVector,
-        Ξ::AbstractVector,
-        dΠ::AbstractVector,
-        dΞ::AbstractVector
-    )
+function energy_rate(ops::WaveOperators,
+                     Π::AbstractVector,
+                     Ψ::AbstractVector,
+                     dΠ::AbstractVector,
+                     dΨ::AbstractVector)
     n = length(ops.r)
     length(Π) == n || throw(DimensionMismatch("`Π` length must match grid size $(n)."))
-    length(Ξ) == n || throw(DimensionMismatch("`Ξ` length must match grid size $(n)."))
+    length(Ψ) == n || throw(DimensionMismatch("`Ψ` length must match grid size $(n)."))
     length(dΠ) == n || throw(DimensionMismatch("`dΠ` length must match grid size $(n)."))
-    length(dΞ) == n || throw(DimensionMismatch("`dΞ` length must match grid size $(n)."))
-    return dot(Π, ops.H * dΠ) + dot(Ξ, ops.H * dΞ)
+    length(dΨ) == n || throw(DimensionMismatch("`dΨ` length must match grid size $(n)."))
+    S = _wave_scalar_mass(ops)
+    V = _wave_vector_mass(ops)
+    return dot(Π, S * dΠ) + dot(Ψ, V * dΨ)
 end
 
-@inline function _boundary_flux_term(ops::WaveOperators, Π::AbstractVector, Ξ::AbstractVector)
-    return Float64(ops.B[end, end]) * Float64(Π[end]) * Float64(Ξ[end])
+@inline function _boundary_flux_term(ops::WaveOperators, Π::AbstractVector,
+                                     Ψ::AbstractVector)
+    return Float64(ops.B[end, end]) * Float64(Π[end]) * Float64(Ψ[end])
 end
 
-function _runtime_rhs_energy_diagnostics(
-        ops::WaveOperators,
-        params::WaveODEParams,
-        Π::AbstractVector{<:Real},
-        Ξ::AbstractVector{<:Real},
-        t::Real;
-        sbp_residual_matrix = nothing
-    )
+function _runtime_rhs_energy_diagnostics(ops::WaveOperators,
+                                         params::WaveODEParams,
+                                         Π::AbstractVector{<:Real},
+                                         Ψ::AbstractVector{<:Real},
+                                         t::Real;
+                                         sbp_residual_matrix = nothing)
     n = length(ops.r)
     length(Π) == n || throw(DimensionMismatch("`Π` length must match grid size $(n)."))
-    length(Ξ) == n || throw(DimensionMismatch("`Ξ` length must match grid size $(n)."))
+    length(Ψ) == n || throw(DimensionMismatch("`Ψ` length must match grid size $(n)."))
 
     Πf = Float64.(Π)
-    Ξf = Float64.(Ξ)
+    Ψf = Float64.(Ψ)
 
-    U = hcat(Πf, Ξf)
+    U = hcat(Πf, Ψf)
     dU = zeros(Float64, n, 2)
     wave_system_ode!(dU, U, params, t)
     dΠ = @view dU[:, 1]
-    dΞ = @view dU[:, 2]
+    dΨ = @view dU[:, 2]
 
-    dΠ_interior = Vector{Float64}(ops.D * Ξf)
-    dΞ_interior = Vector{Float64}(ops.Geven * Πf)
+    dΠ_interior = Vector{Float64}(ops.D * Ψf)
+    dΨ_interior = Vector{Float64}(ops.Geven * Πf)
     if params.enforce_origin
-        dΞ_interior[1] = 0.0
+        dΨ_interior[1] = 0.0
     end
 
-    dE = Float64(energy_rate(ops, Πf, Ξf, dΠ, dΞ))
-    dE_interior = Float64(energy_rate(ops, Πf, Ξf, dΠ_interior, dΞ_interior))
+    dE = Float64(energy_rate(ops, Πf, Ψf, dΠ, dΨ))
+    dE_interior = Float64(energy_rate(ops, Πf, Ψf, dΠ_interior, dΨ_interior))
     dE_sat = dE - dE_interior
 
-    flux = _boundary_flux_term(ops, Πf, Ξf)
+    flux = _boundary_flux_term(ops, Πf, Ψf)
+    S = _wave_scalar_mass(ops)
+    V = _wave_vector_mass(ops)
     R_sbp = sbp_residual_matrix === nothing ?
-        (ops.H * ops.D + transpose(ops.Geven) * ops.H - ops.B) :
-        sbp_residual_matrix
-    sbp_residual_term = Float64(dot(Πf, R_sbp * Ξf))
-    chars = boundary_characteristics(Πf[end], Ξf[end])
+            (S * ops.D + transpose(ops.Geven) * V - ops.B) :
+            sbp_residual_matrix
+    sbp_residual_term = Float64(dot(Πf, R_sbp * Ψf))
+    chars = boundary_characteristics(Πf[end], Ψf[end])
     w_in = Float64(chars.w_in)
     w_out = Float64(chars.w_out)
     win_minus_wout = w_in - w_out
     win_plus_wout = w_in + w_out
 
-    return (
-        dE = dE,
-        dE_interior = dE_interior,
-        dE_sat = dE_sat,
-        flux = flux,
-        interior_minus_flux = dE_interior - flux,
-        sbp_residual_term = sbp_residual_term,
-        interior_minus_flux_minus_sbp = (dE_interior - flux) - sbp_residual_term,
-        total_plus_flux = dE + flux,
-        total_minus_flux = dE - flux,
-        w_in = w_in,
-        w_out = w_out,
-        win_minus_wout = win_minus_wout,
-        win_plus_wout = win_plus_wout,
-    )
+    return (dE = dE,
+            dE_interior = dE_interior,
+            dE_sat = dE_sat,
+            flux = flux,
+            interior_minus_flux = dE_interior - flux,
+            sbp_residual_term = sbp_residual_term,
+            interior_minus_flux_minus_sbp = (dE_interior - flux) - sbp_residual_term,
+            total_plus_flux = dE + flux,
+            total_minus_flux = dE - flux,
+            w_in = w_in,
+            w_out = w_out,
+            win_minus_wout = win_minus_wout,
+            win_plus_wout = win_plus_wout)
 end
 
 function _classify_energy_rate(values::Vector{Float64}; tol::Float64 = 1.0e-12)
@@ -1754,43 +1699,39 @@ function _classify_energy_rate(values::Vector{Float64}; tol::Float64 = 1.0e-12)
     return :oscillatory
 end
 
-function _run_reflecting_case_energy_diagnostics(
-        ops::WaveOperators;
-        pi0::Vector{Float64},
-        xi0::Vector{Float64},
-        dt::Float64,
-        T_final::Float64,
-        K::Int,
-        alg,
-        enforce_origin::Bool
-    )
+function _run_reflecting_case_energy_diagnostics(ops::WaveOperators;
+                                                 pi0::Vector{Float64},
+                                                 psi0::Vector{Float64},
+                                                 dt::Float64,
+                                                 T_final::Float64,
+                                                 K::Int,
+                                                 alg,
+                                                 enforce_origin::Bool)
     has_origin_node = _has_origin_node(ops)
     enforce_origin_effective = _resolve_enforce_origin(ops, enforce_origin)
     Πseed = copy(pi0)
-    Ξseed = copy(xi0)
-    initialize_wave_state!(
-        Πseed,
-        Ξseed;
-        enforce_origin = enforce_origin_effective,
-        has_origin_node = has_origin_node
-    )
+    Ψseed = copy(psi0)
+    initialize_wave_state!(Πseed,
+                           Ψseed;
+                           enforce_origin = enforce_origin_effective,
+                           has_origin_node = has_origin_node)
 
-    sol = solve_wave_ode(
-        ops;
-        T_final = T_final,
-        dt = dt,
-        alg = alg,
-        boundary_condition = :reflecting,
-        pi0 = Πseed,
-        xi0 = Ξseed,
-        save_every = 1,
-        enforce_origin = enforce_origin_effective,
-        check_initial_data = true,
-        verbose = false
-    )
+    sol = solve_wave_ode(ops;
+                         T_final = T_final,
+                         dt = dt,
+                         alg = alg,
+                         boundary_condition = :reflecting,
+                         pi0 = Πseed,
+                         psi0 = Ψseed,
+                         save_every = 1,
+                         enforce_origin = enforce_origin_effective,
+                         check_initial_data = true,
+                         verbose = false)
 
-    params = WaveODEParams(ops; boundary_condition = :reflecting, enforce_origin = enforce_origin_effective)
-    R_sbp = ops.H * ops.D + transpose(ops.Geven) * ops.H - ops.B
+    params = WaveODEParams(ops; boundary_condition = :reflecting,
+                           enforce_origin = enforce_origin_effective)
+    R_sbp = _wave_scalar_mass(ops) * ops.D + transpose(ops.Geven) * _wave_vector_mass(ops) -
+            ops.B
     K_used = min(K, length(sol.t))
     rows = NamedTuple[]
     dE_vals = Vector{Float64}(undef, K_used)
@@ -1805,15 +1746,13 @@ function _run_reflecting_case_energy_diagnostics(
 
     for k in 1:K_used
         Πk = @view sol.Π[:, k]
-        Ξk = @view sol.Ξ[:, k]
-        entry = _runtime_rhs_energy_diagnostics(
-            ops,
-            params,
-            Πk,
-            Ξk,
-            sol.t[k];
-            sbp_residual_matrix = R_sbp
-        )
+        Ψk = @view sol.Ψ[:, k]
+        entry = _runtime_rhs_energy_diagnostics(ops,
+                                                params,
+                                                Πk,
+                                                Ψk,
+                                                sol.t[k];
+                                                sbp_residual_matrix = R_sbp)
 
         dE_vals[k] = entry.dE
         dE_interior_vals[k] = entry.dE_interior
@@ -1825,66 +1764,62 @@ function _run_reflecting_case_energy_diagnostics(
         wm_vals[k] = entry.win_minus_wout
         wp_vals[k] = entry.win_plus_wout
 
-        push!(
-            rows,
-            (
-                k = k,
-                t = sol.t[k],
-                dE = entry.dE,
-                dE_interior = entry.dE_interior,
-                dE_sat = entry.dE_sat,
-                flux = entry.flux,
-                interior_minus_flux = entry.interior_minus_flux,
-                sbp_residual_term = entry.sbp_residual_term,
-                interior_minus_flux_minus_sbp = entry.interior_minus_flux_minus_sbp,
-                total_plus_flux = entry.total_plus_flux,
-                total_minus_flux = entry.total_minus_flux,
-                w_in = entry.w_in,
-                w_out = entry.w_out,
-                win_minus_wout = entry.win_minus_wout,
-                win_plus_wout = entry.win_plus_wout,
-            )
-        )
+        push!(rows,
+              (k = k,
+               t = sol.t[k],
+               dE = entry.dE,
+               dE_interior = entry.dE_interior,
+               dE_sat = entry.dE_sat,
+               flux = entry.flux,
+               interior_minus_flux = entry.interior_minus_flux,
+               sbp_residual_term = entry.sbp_residual_term,
+               interior_minus_flux_minus_sbp = entry.interior_minus_flux_minus_sbp,
+               total_plus_flux = entry.total_plus_flux,
+               total_minus_flux = entry.total_minus_flux,
+               w_in = entry.w_in,
+               w_out = entry.w_out,
+               win_minus_wout = entry.win_minus_wout,
+               win_plus_wout = entry.win_plus_wout))
     end
 
     dE_steps = diff(sol.energy)
     K_steps = min(K, length(dE_steps))
     dE_steps_early = K_steps > 0 ? dE_steps[1:K_steps] : Float64[]
 
-    return (
-        sol = sol,
-        K_used = K_used,
-        rows = rows,
-        dE_vals = dE_vals,
-        dE_interior_vals = dE_interior_vals,
-        flux_vals = flux_vals,
-        sbp_residual_term_vals = sbp_term_vals,
-        sbp_formula_error_vals = sbp_formula_err_vals,
-        w_in_vals = win_vals,
-        w_out_vals = wout_vals,
-        win_minus_wout_vals = wm_vals,
-        win_plus_wout_vals = wp_vals,
-        dE_sign = _classify_energy_rate(dE_vals),
-        dE0 = isempty(dE_vals) ? NaN : dE_vals[1],
-        max_abs_dE = isempty(dE_vals) ? NaN : _maxabs_vec(dE_vals),
-        max_abs_dE_interior = isempty(dE_interior_vals) ? NaN :
-            _maxabs_vec(dE_interior_vals),
-        max_abs_flux = isempty(flux_vals) ? NaN : _maxabs_vec(flux_vals),
-        max_abs_sbp_residual_term = isempty(sbp_term_vals) ? NaN :
-            _maxabs_vec(sbp_term_vals),
-        max_abs_interior_minus_flux_minus_sbp = isempty(sbp_formula_err_vals) ? NaN :
-            _maxabs_vec(sbp_formula_err_vals),
-        max_abs_interior_minus_flux = isempty(rows) ? NaN :
-            _maxabs_vec(getfield.(rows, :interior_minus_flux)),
-        max_abs_total_plus_flux = isempty(rows) ? NaN :
-            _maxabs_vec(getfield.(rows, :total_plus_flux)),
-        max_abs_total_minus_flux = isempty(rows) ? NaN :
-            _maxabs_vec(getfield.(rows, :total_minus_flux)),
-        max_abs_win_minus_wout = isempty(wm_vals) ? NaN : _maxabs_vec(wm_vals),
-        max_abs_win_plus_wout = isempty(wp_vals) ? NaN : _maxabs_vec(wp_vals),
-        max_step_energy_increase = isempty(dE_steps_early) ? NaN : maximum(dE_steps_early),
-        min_step_energy_change = isempty(dE_steps_early) ? NaN : minimum(dE_steps_early),
-    )
+    return (sol = sol,
+            K_used = K_used,
+            rows = rows,
+            dE_vals = dE_vals,
+            dE_interior_vals = dE_interior_vals,
+            flux_vals = flux_vals,
+            sbp_residual_term_vals = sbp_term_vals,
+            sbp_formula_error_vals = sbp_formula_err_vals,
+            w_in_vals = win_vals,
+            w_out_vals = wout_vals,
+            win_minus_wout_vals = wm_vals,
+            win_plus_wout_vals = wp_vals,
+            dE_sign = _classify_energy_rate(dE_vals),
+            dE0 = isempty(dE_vals) ? NaN : dE_vals[1],
+            max_abs_dE = isempty(dE_vals) ? NaN : _maxabs_vec(dE_vals),
+            max_abs_dE_interior = isempty(dE_interior_vals) ? NaN :
+                                  _maxabs_vec(dE_interior_vals),
+            max_abs_flux = isempty(flux_vals) ? NaN : _maxabs_vec(flux_vals),
+            max_abs_sbp_residual_term = isempty(sbp_term_vals) ? NaN :
+                                        _maxabs_vec(sbp_term_vals),
+            max_abs_interior_minus_flux_minus_sbp = isempty(sbp_formula_err_vals) ? NaN :
+                                                    _maxabs_vec(sbp_formula_err_vals),
+            max_abs_interior_minus_flux = isempty(rows) ? NaN :
+                                          _maxabs_vec(getfield.(rows, :interior_minus_flux)),
+            max_abs_total_plus_flux = isempty(rows) ? NaN :
+                                      _maxabs_vec(getfield.(rows, :total_plus_flux)),
+            max_abs_total_minus_flux = isempty(rows) ? NaN :
+                                       _maxabs_vec(getfield.(rows, :total_minus_flux)),
+            max_abs_win_minus_wout = isempty(wm_vals) ? NaN : _maxabs_vec(wm_vals),
+            max_abs_win_plus_wout = isempty(wp_vals) ? NaN : _maxabs_vec(wp_vals),
+            max_step_energy_increase = isempty(dE_steps_early) ? NaN :
+                                       maximum(dE_steps_early),
+            min_step_energy_change = isempty(dE_steps_early) ? NaN :
+                                     minimum(dE_steps_early))
 end
 
 function _reflecting_constraint_diagnostics()
@@ -1894,25 +1829,25 @@ function _reflecting_constraint_diagnostics()
     b = 0.5 * (rA - rB)
 
     kind = if isapprox(a, 1.0; atol = 1.0e-12, rtol = 0.0) &&
-            isapprox(b, -1.0; atol = 1.0e-12, rtol = 0.0)
+              isapprox(b, -1.0; atol = 1.0e-12, rtol = 0.0)
         :w_in_minus_w_out
     elseif isapprox(a, 1.0; atol = 1.0e-12, rtol = 0.0) &&
-            isapprox(b, 1.0; atol = 1.0e-12, rtol = 0.0)
+           isapprox(b, 1.0; atol = 1.0e-12, rtol = 0.0)
         :w_in_plus_w_out
     elseif isapprox(a, 1.0; atol = 1.0e-12, rtol = 0.0) &&
-            isapprox(b, 0.0; atol = 1.0e-12, rtol = 0.0)
+           isapprox(b, 0.0; atol = 1.0e-12, rtol = 0.0)
         :w_in_only
     elseif isapprox(a, 0.0; atol = 1.0e-12, rtol = 0.0) &&
-            isapprox(b, 1.0; atol = 1.0e-12, rtol = 0.0)
+           isapprox(b, 1.0; atol = 1.0e-12, rtol = 0.0)
         :w_out_only
     else
         :unknown_linear_combination
     end
 
     target = if kind === :w_in_minus_w_out
-        "w_in - w_out = 0 (equivalently Xi(R)=0, i.e. w_in = +w_out)"
+        "w_in - w_out = 0 (equivalently Ψ(R)=0, i.e. w_in = +w_out)"
     elseif kind === :w_in_plus_w_out
-        "w_in + w_out = 0 (equivalently Pi(R)=0, i.e. w_in = -w_out)"
+        "w_in + w_out = 0 (equivalently Π(R)=0, i.e. w_in = -w_out)"
     elseif kind === :w_in_only
         "w_in = 0 (incoming characteristic kill)"
     elseif kind === :w_out_only
@@ -1924,21 +1859,17 @@ function _reflecting_constraint_diagnostics()
     return (a = a, b = b, kind = kind, target_relation = target)
 end
 
-function _probe_runtime_operator_matrix(
-        ops::WaveOperators;
-        boundary_condition::Symbol,
-        enforce_origin::Bool
-    )
+function _probe_runtime_operator_matrix(ops::WaveOperators;
+                                        boundary_condition::Symbol,
+                                        enforce_origin::Bool)
     n = length(ops.r)
     m = 2 * n
     A = Matrix{Float64}(undef, m, m)
     e = zeros(Float64, m)
     f = zeros(Float64, m)
-    params = WaveODEParams(
-        ops;
-        boundary_condition = boundary_condition,
-        enforce_origin = enforce_origin
-    )
+    params = WaveODEParams(ops;
+                           boundary_condition = boundary_condition,
+                           enforce_origin = enforce_origin)
     for j in 1:m
         fill!(e, 0.0)
         e[j] = 1.0
@@ -1948,15 +1879,14 @@ function _probe_runtime_operator_matrix(
     return A
 end
 
-function _skew_report_from_runtime_A(
-        ops::WaveOperators,
-        A_runtime::Matrix{Float64}
-    )
+function _skew_report_from_runtime_A(ops::WaveOperators,
+                                     A_runtime::Matrix{Float64})
     n = length(ops.r)
     m = 2 * n
-    H = Matrix{Float64}(ops.H)
+    S_mass = Matrix{Float64}(_wave_scalar_mass(ops))
+    V_mass = Matrix{Float64}(_wave_vector_mass(ops))
     Z = zeros(Float64, n, n)
-    Hblk = [H Z; Z H]
+    Hblk = [S_mass Z; Z V_mass]
     S = transpose(A_runtime) * Hblk + Hblk * A_runtime
 
     full = _maxabs_matrix_with_arg(S)
@@ -1976,39 +1906,33 @@ function _skew_report_from_runtime_A(
         _maxabs_matrix_with_arg(S[safe_idx, safe_idx])
     end
 
-    return (
-        S = S,
-        maxabs_full = full.maxabs,
-        maxabs_no_origin = no_origin.maxabs,
-        maxabs_safe = safe.maxabs,
-        argmax_full = (i = full.i, j = full.j, value = full.value),
-        argmax_no_origin = (
-            i = no_origin_i,
-            j = no_origin_j,
-            value = no_origin.value,
-            i_desc = _decode_block_index(no_origin_i, n, Float64.(ops.r)),
-            j_desc = _decode_block_index(no_origin_j, n, Float64.(ops.r)),
-        ),
-        origin_indices = origin_idx,
-        no_origin_indices = no_origin_idx,
-        safe_indices = safe_idx,
-    )
+    return (S = S,
+            maxabs_full = full.maxabs,
+            maxabs_no_origin = no_origin.maxabs,
+            maxabs_safe = safe.maxabs,
+            argmax_full = (i = full.i, j = full.j, value = full.value),
+            argmax_no_origin = (i = no_origin_i,
+                                j = no_origin_j,
+                                value = no_origin.value,
+                                i_desc = _decode_block_index(no_origin_i, n,
+                                                             Float64.(ops.r)),
+                                j_desc = _decode_block_index(no_origin_j, n,
+                                                             Float64.(ops.r))),
+            origin_indices = origin_idx,
+            no_origin_indices = no_origin_idx,
+            safe_indices = safe_idx)
 end
 
-function _runtime_skew_energy_partition(
-        case_data::NamedTuple,
-        skew::NamedTuple
-    )
+function _runtime_skew_energy_partition(case_data::NamedTuple,
+                                        skew::NamedTuple)
     sol = case_data.sol
     K_used = case_data.K_used
     if K_used == 0
-        return (
-            K_used = 0,
-            max_abs_rhs_minus_quadratic = NaN,
-            max_abs_quadratic_no_origin = NaN,
-            max_abs_quadratic_origin_coupling = NaN,
-            rows = NamedTuple[],
-        )
+        return (K_used = 0,
+                max_abs_rhs_minus_quadratic = NaN,
+                max_abs_quadratic_no_origin = NaN,
+                max_abs_quadratic_origin_coupling = NaN,
+                rows = NamedTuple[])
     end
 
     n = size(sol.Π, 1)
@@ -2026,7 +1950,7 @@ function _runtime_skew_energy_partition(
 
     for k in 1:K_used
         @views U[1:n] .= sol.Π[:, k]
-        @views U[(n + 1):(2 * n)] .= sol.Ξ[:, k]
+        @views U[(n + 1):(2 * n)] .= sol.Ψ[:, k]
 
         q_full = 0.5 * dot(U, S * U)
         U_no_origin = U[no_origin_idx]
@@ -2040,87 +1964,72 @@ function _runtime_skew_energy_partition(
         quad_no_origin[k] = q_no_origin
         quad_origin_coupling[k] = q_origin_coupling
 
-        push!(
-            rows,
-            (
-                k = k,
-                t = sol.t[k],
-                dE_rhs = case_data.dE_vals[k],
-                dE_quadratic = q_full,
-                rhs_minus_quadratic = rhs_err,
-                dE_quadratic_no_origin = q_no_origin,
-                dE_quadratic_origin_coupling = q_origin_coupling,
-            )
-        )
+        push!(rows,
+              (k = k,
+               t = sol.t[k],
+               dE_rhs = case_data.dE_vals[k],
+               dE_quadratic = q_full,
+               rhs_minus_quadratic = rhs_err,
+               dE_quadratic_no_origin = q_no_origin,
+               dE_quadratic_origin_coupling = q_origin_coupling))
     end
 
-    return (
-        K_used = K_used,
-        max_abs_rhs_minus_quadratic = _maxabs_vec(rhs_minus_quad),
-        max_abs_quadratic_no_origin = _maxabs_vec(quad_no_origin),
-        max_abs_quadratic_origin_coupling = _maxabs_vec(quad_origin_coupling),
-        rows = rows,
-    )
+    return (K_used = K_used,
+            max_abs_rhs_minus_quadratic = _maxabs_vec(rhs_minus_quad),
+            max_abs_quadratic_no_origin = _maxabs_vec(quad_no_origin),
+            max_abs_quadratic_origin_coupling = _maxabs_vec(quad_origin_coupling),
+            rows = rows)
 end
 
-function _bigfloat_reflecting_rate(
-        ops::WaveOperators,
-        Π::AbstractVector{<:Real},
-        Ξ::AbstractVector{<:Real};
-        enforce_origin::Bool
-    )
+function _bigfloat_reflecting_rate(ops::WaveOperators,
+                                   Π::AbstractVector{<:Real},
+                                   Ψ::AbstractVector{<:Real};
+                                   enforce_origin::Bool)
     Πb = BigFloat.(Π)
-    Ξb = BigFloat.(Ξ)
+    Ψb = BigFloat.(Ψ)
     D = BigFloat.(Matrix(ops.D))
     G = BigFloat.(Matrix(ops.Geven))
-    H = BigFloat.(Matrix(ops.H))
-    dΠ = D * Ξb
-    dΞ = G * Πb
-    if _resolve_enforce_origin(ops, enforce_origin) && !isempty(dΞ)
-        dΞ[1] = big"0"
+    S = BigFloat.(Matrix(_wave_scalar_mass(ops)))
+    V = BigFloat.(Matrix(_wave_vector_mass(ops)))
+    dΠ = D * Ψb
+    dΨ = G * Πb
+    if _resolve_enforce_origin(ops, enforce_origin) && !isempty(dΨ)
+        dΨ[1] = big"0"
     end
     BNN = BigFloat(ops.B[end, end])
-    HNN = BigFloat(ops.H[end, end])
-    dΠ[end] -= (BNN / HNN) * Ξb[end]
-    dE = dot(Πb, H * dΠ) + dot(Ξb, H * dΞ)
+    SNN = BigFloat(_wave_scalar_mass(ops)[end, end])
+    dΠ[end] -= (BNN / SNN) * Ψb[end]
+    dE = dot(Πb, S * dΠ) + dot(Ψb, V * dΨ)
     return dE
 end
 
-function _dt_scaling_reflecting_dE(
-        ops::WaveOperators;
-        pi0::Vector{Float64},
-        xi0::Vector{Float64},
-        dt::Float64,
-        T_final::Float64,
-        K::Int,
-        alg,
-        enforce_origin::Bool
-    )
+function _dt_scaling_reflecting_dE(ops::WaveOperators;
+                                   pi0::Vector{Float64},
+                                   psi0::Vector{Float64},
+                                   dt::Float64,
+                                   T_final::Float64,
+                                   K::Int,
+                                   alg,
+                                   enforce_origin::Bool)
     dts = (dt, dt / 2)
     rows = NamedTuple[]
     for dti in dts
-        case = _run_reflecting_case_energy_diagnostics(
-            ops;
-            pi0 = pi0,
-            xi0 = xi0,
-            dt = dti,
-            T_final = T_final,
-            K = K,
-            alg = alg,
-            enforce_origin = enforce_origin
-        )
-        push!(
-            rows,
-            (
-                dt = dti,
-                max_abs_dE_rhs = case.max_abs_dE,
-                dE_sign = case.dE_sign,
-                max_step_energy_increase = case.max_step_energy_increase,
-            )
-        )
+        case = _run_reflecting_case_energy_diagnostics(ops;
+                                                       pi0 = pi0,
+                                                       psi0 = psi0,
+                                                       dt = dti,
+                                                       T_final = T_final,
+                                                       K = K,
+                                                       alg = alg,
+                                                       enforce_origin = enforce_origin)
+        push!(rows,
+              (dt = dti,
+               max_abs_dE_rhs = case.max_abs_dE,
+               dE_sign = case.dE_sign,
+               max_step_energy_increase = case.max_step_energy_increase))
     end
     ratio = rows[2].max_abs_dE_rhs > 0 ? rows[1].max_abs_dE_rhs / rows[2].max_abs_dE_rhs :
-        NaN
+            NaN
     return (rows = rows, ratio_dt_to_dt2 = ratio)
 end
 
@@ -2132,40 +2041,39 @@ by semidiscrete bias or by time integration.
 
 Checks included:
 1. direct semidiscrete `dE/dt` from the runtime RHS (`wave_system_ode!`),
-2. interior flux vs SAT cancellation (`Π[end]*Ξ[end]*B[end,end]`),
+2. interior flux vs SAT cancellation (`Π[end]*Ψ[end]*B[end,end]`),
 3. characteristic behavior at the outer boundary (`w_in`, `w_out`, `w_in±w_out`),
 4. runtime-probed block operator `A_runtime` and skew defect `S = A' Hblk + Hblk A`,
 5. mismatch check between `A_runtime` and the analytic Jacobian path,
 6. decomposition of `dE` into no-origin and origin-coupling contributions via `0.5*U'SU`,
-7. initial-data potential consistency and expected `Ξ` growth via `max|Geven*Π0|`.
+7. initial-data potential consistency and expected `Ψ` growth via `max|Geven*Π0|`.
 
 The routine runs two initial-data cases on the same operators:
-- Gaussian: `Π = exp(-r^2/2)`, `Ξ = 0`,
-- Compact bump: `Π = bumpb((r-center)/radius)`, `Ξ = 0`.
+- Gaussian: `Π = exp(-r^2/2)`, `Ψ = 0`,
+- Compact bump: `Π = bumpb((r-center)/radius)`, `Ψ = 0`.
 
 Returns a `NamedTuple` and prints a concise diagnostics summary.
 """
 function diagnose_reflecting_sat_energy_drift(;
-        source = MattssonNordström2004(),
-        accuracy_order::Int = 6,
-        N::Union{Int, Nothing} = nothing,
-        R::Real = 16.0,
-        dr::Real = 0.1,
-        p::Int = 2,
-        mode = FastMode(),
-        build_matrix::Symbol = :matrix_if_square,
-        dt = nothing,
-        cfl::Real = 0.25,
-        T_final::Real = 2.5,
-        K::Int = 100,
-        alg = ImplicitMidpoint(),
-        enforce_origin::Bool = true,
-        bump_radius::Real = 1.0,
-        bump_center::Real = 0.0,
-        run_dt_scaling::Bool = false,
-        bigfloat_check::Bool = false,
-        verbose::Bool = true
-    )
+                                              source = MattssonNordström2004(),
+                                              accuracy_order::Int = 6,
+                                              N::Union{Int, Nothing} = nothing,
+                                              R::Real = 16.0,
+                                              dr::Real = 0.1,
+                                              p::Int = 2,
+                                              mode = FastMode(),
+                                              build_matrix::Symbol = :matrix_if_square,
+                                              dt = nothing,
+                                              cfl::Real = 0.25,
+                                              T_final::Real = 2.5,
+                                              K::Int = 100,
+                                              alg = ImplicitMidpoint(),
+                                              enforce_origin::Bool = true,
+                                              bump_radius::Real = 1.0,
+                                              bump_center::Real = 0.0,
+                                              run_dt_scaling::Bool = false,
+                                              bigfloat_check::Bool = false,
+                                              verbose::Bool = true)
     dr > 0 || throw(ArgumentError("`dr` must be positive."))
     cfl > 0 || throw(ArgumentError("`cfl` must be positive."))
     K > 0 || throw(ArgumentError("`K` must be positive."))
@@ -2185,69 +2093,55 @@ function diagnose_reflecting_sat_energy_drift(;
     dt_use > 0 || throw(ArgumentError("`dt` must be positive."))
     T_use = max(Float64(T_final), Float64(K) * dt_use)
 
-    ops = spherical_operators(
-        source;
-        accuracy_order = accuracy_order,
-        N = N_use,
-        R = R,
-        p = p,
-        mode = mode,
-        build_matrix = build_matrix
-    )
+    ops = diagonal_spherical_operators(source;
+                              accuracy_order = accuracy_order,
+                              N = N_use,
+                              R = R,
+                              p = p,
+                              mode = mode)
     r = Float64.(ops.r)
     n = length(r)
 
     Π0_gaussian = exp.(-0.5 .* (r .^ 2))
     Π0_bump = bumpb_profile(r; amplitude = 1.0, center = bump_center, radius = bump_radius)
-    xi0_zero = zeros(Float64, n)
+    psi0_zero = zeros(Float64, n)
 
-    case_gaussian = _run_reflecting_case_energy_diagnostics(
-        ops;
-        pi0 = Π0_gaussian,
-        xi0 = xi0_zero,
-        dt = dt_use,
-        T_final = T_use,
-        K = K,
-        alg = alg,
-        enforce_origin = enforce_origin
-    )
-    case_bump = _run_reflecting_case_energy_diagnostics(
-        ops;
-        pi0 = Π0_bump,
-        xi0 = xi0_zero,
-        dt = dt_use,
-        T_final = T_use,
-        K = K,
-        alg = alg,
-        enforce_origin = enforce_origin
-    )
+    case_gaussian = _run_reflecting_case_energy_diagnostics(ops;
+                                                            pi0 = Π0_gaussian,
+                                                            psi0 = psi0_zero,
+                                                            dt = dt_use,
+                                                            T_final = T_use,
+                                                            K = K,
+                                                            alg = alg,
+                                                            enforce_origin = enforce_origin)
+    case_bump = _run_reflecting_case_energy_diagnostics(ops;
+                                                        pi0 = Π0_bump,
+                                                        psi0 = psi0_zero,
+                                                        dt = dt_use,
+                                                        T_final = T_use,
+                                                        K = K,
+                                                        alg = alg,
+                                                        enforce_origin = enforce_origin)
 
-    potential_gaussian = check_potential_consistency(
-        ops,
-        case_gaussian.sol.Π[:, 1],
-        case_gaussian.sol.Ξ[:, 1]
-    )
-    potential_bump = check_potential_consistency(
-        ops,
-        case_bump.sol.Π[:, 1],
-        case_bump.sol.Ξ[:, 1]
-    )
+    potential_gaussian = check_potential_consistency(ops,
+                                                     case_gaussian.sol.Π[:, 1],
+                                                     case_gaussian.sol.Ψ[:, 1])
+    potential_bump = check_potential_consistency(ops,
+                                                 case_bump.sol.Π[:, 1],
+                                                 case_bump.sol.Ψ[:, 1])
 
     constraint = _reflecting_constraint_diagnostics()
 
-    A_runtime = _probe_runtime_operator_matrix(
-        ops;
-        boundary_condition = :reflecting,
-        enforce_origin = enforce_origin
-    )
+    A_runtime = _probe_runtime_operator_matrix(ops;
+                                               boundary_condition = :reflecting,
+                                               enforce_origin = enforce_origin)
     nstate = 2 * n
     J_runtime = zeros(Float64, nstate, nstate)
-    wave_system_jac!(
-        J_runtime,
-        zeros(Float64, nstate),
-        WaveODEParams(ops; boundary_condition = :reflecting, enforce_origin = enforce_origin),
-        0.0
-    )
+    wave_system_jac!(J_runtime,
+                     zeros(Float64, nstate),
+                     WaveODEParams(ops; boundary_condition = :reflecting,
+                                   enforce_origin = enforce_origin),
+                     0.0)
 
     A_diff = A_runtime .- J_runtime
     A_diff_report = _maxabs_matrix_with_arg(A_diff)
@@ -2256,32 +2150,26 @@ function diagnose_reflecting_sat_energy_drift(;
     skew_partition_bump = _runtime_skew_energy_partition(case_bump, skew)
 
     bigfloat = if bigfloat_check
-        (
-            enabled = true,
-            gaussian_t0_dE = _bigfloat_reflecting_rate(
-                ops, case_gaussian.sol.Π[:, 1], case_gaussian.sol.Ξ[:, 1];
-                enforce_origin = enforce_origin
-            ),
-            bump_t0_dE = _bigfloat_reflecting_rate(
-                ops, case_bump.sol.Π[:, 1], case_bump.sol.Ξ[:, 1];
-                enforce_origin = enforce_origin
-            ),
-        )
+        (enabled = true,
+         gaussian_t0_dE = _bigfloat_reflecting_rate(ops, case_gaussian.sol.Π[:, 1],
+                                                    case_gaussian.sol.Ψ[:, 1];
+                                                    enforce_origin = enforce_origin),
+         bump_t0_dE = _bigfloat_reflecting_rate(ops, case_bump.sol.Π[:, 1],
+                                                case_bump.sol.Ψ[:, 1];
+                                                enforce_origin = enforce_origin))
     else
         (enabled = false, gaussian_t0_dE = big"NaN", bump_t0_dE = big"NaN")
     end
 
     dt_scaling = if run_dt_scaling
-        _dt_scaling_reflecting_dE(
-            ops;
-            pi0 = Π0_gaussian,
-            xi0 = xi0_zero,
-            dt = dt_use,
-            T_final = T_use,
-            K = K,
-            alg = alg,
-            enforce_origin = enforce_origin
-        )
+        _dt_scaling_reflecting_dE(ops;
+                                  pi0 = Π0_gaussian,
+                                  psi0 = psi0_zero,
+                                  dt = dt_use,
+                                  T_final = T_use,
+                                  K = K,
+                                  alg = alg,
+                                  enforce_origin = enforce_origin)
     else
         (rows = NamedTuple[], ratio_dt_to_dt2 = NaN)
     end
@@ -2292,80 +2180,60 @@ function diagnose_reflecting_sat_energy_drift(;
     tol_consistency = 1.0e-10
 
     if constraint.kind === :w_in_minus_w_out || constraint.kind === :w_in_plus_w_out
-        push!(
-            conclusions,
-            "Reflecting SAT enforces a no-flux characteristic relation ($(constraint.target_relation))."
-        )
+        push!(conclusions,
+              "Reflecting SAT enforces a no-flux characteristic relation ($(constraint.target_relation)).")
     else
-        push!(conclusions, "Reflecting SAT is not enforcing no-flux; fix BC to w_in = ± w_out.")
+        push!(conclusions,
+              "Reflecting SAT is not enforcing no-flux; fix BC to w_in = ± w_out.")
     end
 
     if skew.maxabs_no_origin > tol_skew
-        push!(
-            conclusions,
-            "Semidiscrete runtime operator is not skew-adjoint in the no-origin block; this can cause true energy drift."
-        )
+        push!(conclusions,
+              "Semidiscrete runtime operator is not skew-adjoint in the no-origin block; this can cause true energy drift.")
     else
-        push!(conclusions, "Runtime-probed no-origin skew defect is near machine precision.")
+        push!(conclusions,
+              "Runtime-probed no-origin skew defect is near machine precision.")
     end
 
     if A_diff_report.maxabs > tol_consistency
         push!(conclusions, "Runtime RHS differs from analytic A used in skew check.")
     else
-        push!(
-            conclusions,
-            "Runtime RHS matches analytic Jacobian operator (no hidden SAT/projection mismatch)."
-        )
+        push!(conclusions,
+              "Runtime RHS matches analytic Jacobian operator (no hidden SAT/projection mismatch).")
     end
 
     max_abs_dE_semidiscrete = max(case_gaussian.max_abs_dE, case_bump.max_abs_dE)
-    max_abs_flux_mismatch = max(
-        case_gaussian.max_abs_interior_minus_flux, case_bump.max_abs_interior_minus_flux
-    )
-    max_abs_sbp_formula_mismatch = max(
-        case_gaussian.max_abs_interior_minus_flux_minus_sbp,
-        case_bump.max_abs_interior_minus_flux_minus_sbp
-    )
-    max_abs_rhs_minus_quadratic = max(
-        skew_partition_gaussian.max_abs_rhs_minus_quadratic,
-        skew_partition_bump.max_abs_rhs_minus_quadratic
-    )
-    max_abs_origin_coupling = max(
-        skew_partition_gaussian.max_abs_quadratic_origin_coupling,
-        skew_partition_bump.max_abs_quadratic_origin_coupling
-    )
+    max_abs_flux_mismatch = max(case_gaussian.max_abs_interior_minus_flux,
+                                case_bump.max_abs_interior_minus_flux)
+    max_abs_sbp_formula_mismatch = max(case_gaussian.max_abs_interior_minus_flux_minus_sbp,
+                                       case_bump.max_abs_interior_minus_flux_minus_sbp)
+    max_abs_rhs_minus_quadratic = max(skew_partition_gaussian.max_abs_rhs_minus_quadratic,
+                                      skew_partition_bump.max_abs_rhs_minus_quadratic)
+    max_abs_origin_coupling = max(skew_partition_gaussian.max_abs_quadratic_origin_coupling,
+                                  skew_partition_bump.max_abs_quadratic_origin_coupling)
     if max_abs_sbp_formula_mismatch > tol_energy
-        push!(
-            conclusions,
-            "SAT coefficient scaling mismatch (B/H factors) or flux-sign inconsistency detected."
-        )
+        push!(conclusions,
+              "SAT coefficient scaling mismatch (B/H factors) or flux-sign inconsistency detected.")
     elseif max_abs_flux_mismatch > tol_energy
-        push!(
-            conclusions,
-            "Interior dE-flux mismatch is fully explained by the discrete SBP residual term."
-        )
+        push!(conclusions,
+              "Interior dE-flux mismatch is fully explained by the discrete SBP residual term.")
     end
 
     if max_abs_rhs_minus_quadratic > tol_consistency
-        push!(
-            conclusions,
-            "Runtime dE from RHS does not match quadratic-form prediction from runtime-probed S."
-        )
+        push!(conclusions,
+              "Runtime dE from RHS does not match quadratic-form prediction from runtime-probed S.")
     end
 
     if max_abs_dE_semidiscrete <= tol_energy && skew.maxabs_no_origin <= tol_skew
-        push!(conclusions, "Semidiscrete dE≈0; observed drift is likely a time-integrator artifact.")
+        push!(conclusions,
+              "Semidiscrete dE≈0; observed drift is likely a time-integrator artifact.")
     elseif max_abs_dE_semidiscrete > tol_energy && skew.maxabs_no_origin <= tol_skew
         if max_abs_origin_coupling > tol_energy
-            push!(
-                conclusions,
-                "Nonzero semidiscrete dE is dominated by origin-coupling terms (Π[1] interactions), not reflecting SAT."
-            )
+            push!(conclusions,
+                  "Nonzero semidiscrete dE is dominated by origin-coupling terms (Π[1] interactions), not reflecting SAT.")
         else
-            push!(
-                conclusions,
-                "Nonzero semidiscrete dE detected from runtime RHS despite small skew defect; inspect boundary forcing/state consistency."
-            )
+            push!(conclusions,
+                  "Nonzero semidiscrete dE detected from runtime RHS despite small skew defect; inspect boundary forcing/state consistency.")
         end
     end
     for wmsg in potential_gaussian.warnings
@@ -2375,170 +2243,136 @@ function diagnose_reflecting_sat_energy_drift(;
         push!(conclusions, "Bump initial-data warning: " * wmsg)
     end
 
-    report = (
-        config = (
-            accuracy_order = accuracy_order,
-            N = N_use,
-            R = Float64(R),
-            dr = Float64(dr),
-            p = p,
-            dt = dt_use,
-            cfl = Float64(cfl),
-            T_final = T_use,
-            K = K,
-            algorithm = string(typeof(alg)),
-        ),
-        cases = (
-            gaussian = (
-                dE_t0 = case_gaussian.dE0,
-                max_abs_dE = case_gaussian.max_abs_dE,
-                dE_sign = case_gaussian.dE_sign,
-                max_abs_dE_interior = case_gaussian.max_abs_dE_interior,
-                max_abs_flux = case_gaussian.max_abs_flux,
-                max_abs_sbp_residual_term = case_gaussian.max_abs_sbp_residual_term,
-                max_abs_interior_minus_flux_minus_sbp = case_gaussian.max_abs_interior_minus_flux_minus_sbp,
-                max_abs_interior_minus_flux = case_gaussian.max_abs_interior_minus_flux,
-                max_abs_total_plus_flux = case_gaussian.max_abs_total_plus_flux,
-                max_abs_total_minus_flux = case_gaussian.max_abs_total_minus_flux,
-                max_abs_win_minus_wout = case_gaussian.max_abs_win_minus_wout,
-                max_abs_win_plus_wout = case_gaussian.max_abs_win_plus_wout,
-                max_abs_GPi0 = potential_gaussian.max_abs_GPi,
-                xi_growth_expected_from_pi0 = potential_gaussian.xi_growth_expected_from_pi,
-                potential_consistency = potential_gaussian,
-                max_step_energy_increase = case_gaussian.max_step_energy_increase,
-                min_step_energy_change = case_gaussian.min_step_energy_change,
-                early_rows = case_gaussian.rows,
-            ),
-            bump = (
-                dE_t0 = case_bump.dE0,
-                max_abs_dE = case_bump.max_abs_dE,
-                dE_sign = case_bump.dE_sign,
-                max_abs_dE_interior = case_bump.max_abs_dE_interior,
-                max_abs_flux = case_bump.max_abs_flux,
-                max_abs_sbp_residual_term = case_bump.max_abs_sbp_residual_term,
-                max_abs_interior_minus_flux_minus_sbp = case_bump.max_abs_interior_minus_flux_minus_sbp,
-                max_abs_interior_minus_flux = case_bump.max_abs_interior_minus_flux,
-                max_abs_total_plus_flux = case_bump.max_abs_total_plus_flux,
-                max_abs_total_minus_flux = case_bump.max_abs_total_minus_flux,
-                max_abs_win_minus_wout = case_bump.max_abs_win_minus_wout,
-                max_abs_win_plus_wout = case_bump.max_abs_win_plus_wout,
-                max_abs_GPi0 = potential_bump.max_abs_GPi,
-                xi_growth_expected_from_pi0 = potential_bump.xi_growth_expected_from_pi,
-                potential_consistency = potential_bump,
-                max_step_energy_increase = case_bump.max_step_energy_increase,
-                min_step_energy_change = case_bump.min_step_energy_change,
-                early_rows = case_bump.rows,
-            ),
-        ),
-        characteristic_constraint = constraint,
-        operator_consistency = (
-            runtime_vs_jacobian_maxabs = A_diff_report.maxabs,
-            runtime_vs_jacobian_argmax = (
-                i = A_diff_report.i, j = A_diff_report.j, value = A_diff_report.value,
-            ),
-            skew_runtime = skew,
-            skew_energy_partition = (
-                gaussian = skew_partition_gaussian,
-                bump = skew_partition_bump,
-            ),
-        ),
-        dt_scaling = dt_scaling,
-        bigfloat = bigfloat,
-        conclusions = conclusions,
-    )
+    report = (config = (accuracy_order = accuracy_order,
+                        N = N_use,
+                        R = Float64(R),
+                        dr = Float64(dr),
+                        p = p,
+                        dt = dt_use,
+                        cfl = Float64(cfl),
+                        T_final = T_use,
+                        K = K,
+                        algorithm = string(typeof(alg))),
+              cases = (gaussian = (dE_t0 = case_gaussian.dE0,
+                                   max_abs_dE = case_gaussian.max_abs_dE,
+                                   dE_sign = case_gaussian.dE_sign,
+                                   max_abs_dE_interior = case_gaussian.max_abs_dE_interior,
+                                   max_abs_flux = case_gaussian.max_abs_flux,
+                                   max_abs_sbp_residual_term = case_gaussian.max_abs_sbp_residual_term,
+                                   max_abs_interior_minus_flux_minus_sbp = case_gaussian.max_abs_interior_minus_flux_minus_sbp,
+                                   max_abs_interior_minus_flux = case_gaussian.max_abs_interior_minus_flux,
+                                   max_abs_total_plus_flux = case_gaussian.max_abs_total_plus_flux,
+                                   max_abs_total_minus_flux = case_gaussian.max_abs_total_minus_flux,
+                                   max_abs_win_minus_wout = case_gaussian.max_abs_win_minus_wout,
+                                   max_abs_win_plus_wout = case_gaussian.max_abs_win_plus_wout,
+                                   max_abs_GPi0 = potential_gaussian.max_abs_GPi,
+                                   psi_growth_expected_from_pi0 = potential_gaussian.psi_growth_expected_from_pi,
+                                   potential_consistency = potential_gaussian,
+                                   max_step_energy_increase = case_gaussian.max_step_energy_increase,
+                                   min_step_energy_change = case_gaussian.min_step_energy_change,
+                                   early_rows = case_gaussian.rows),
+                       bump = (dE_t0 = case_bump.dE0,
+                               max_abs_dE = case_bump.max_abs_dE,
+                               dE_sign = case_bump.dE_sign,
+                               max_abs_dE_interior = case_bump.max_abs_dE_interior,
+                               max_abs_flux = case_bump.max_abs_flux,
+                               max_abs_sbp_residual_term = case_bump.max_abs_sbp_residual_term,
+                               max_abs_interior_minus_flux_minus_sbp = case_bump.max_abs_interior_minus_flux_minus_sbp,
+                               max_abs_interior_minus_flux = case_bump.max_abs_interior_minus_flux,
+                               max_abs_total_plus_flux = case_bump.max_abs_total_plus_flux,
+                               max_abs_total_minus_flux = case_bump.max_abs_total_minus_flux,
+                               max_abs_win_minus_wout = case_bump.max_abs_win_minus_wout,
+                               max_abs_win_plus_wout = case_bump.max_abs_win_plus_wout,
+                               max_abs_GPi0 = potential_bump.max_abs_GPi,
+                               psi_growth_expected_from_pi0 = potential_bump.psi_growth_expected_from_pi,
+                               potential_consistency = potential_bump,
+                               max_step_energy_increase = case_bump.max_step_energy_increase,
+                               min_step_energy_change = case_bump.min_step_energy_change,
+                               early_rows = case_bump.rows)),
+              characteristic_constraint = constraint,
+              operator_consistency = (runtime_vs_jacobian_maxabs = A_diff_report.maxabs,
+                                      runtime_vs_jacobian_argmax = (i = A_diff_report.i,
+                                                                    j = A_diff_report.j,
+                                                                    value = A_diff_report.value),
+                                      skew_runtime = skew,
+                                      skew_energy_partition = (gaussian = skew_partition_gaussian,
+                                                               bump = skew_partition_bump)),
+              dt_scaling = dt_scaling,
+              bigfloat = bigfloat,
+              conclusions = conclusions)
 
     if verbose
         println("Reflecting SAT energy-drift diagnostics")
-        println(
-            "  config: acc=", report.config.accuracy_order, ", N=", report.config.N,
-            ", R=", report.config.R, ", dr=", report.config.dr,
-            ", dt=", report.config.dt, ", p=", report.config.p,
-            ", alg=", report.config.algorithm
-        )
-        println(
-            "  reflecting characteristic form: ", report.characteristic_constraint.kind,
-            "  (", report.characteristic_constraint.target_relation, ")"
-        )
+        println("  config: acc=", report.config.accuracy_order, ", N=", report.config.N,
+                ", R=", report.config.R, ", dr=", report.config.dr,
+                ", dt=", report.config.dt, ", p=", report.config.p,
+                ", alg=", report.config.algorithm)
+        println("  reflecting characteristic form: ", report.characteristic_constraint.kind,
+                "  (", report.characteristic_constraint.target_relation, ")")
 
-        for (name, case_rep) in
-            ((:gaussian, report.cases.gaussian), (:bump, report.cases.bump))
+        for (name, case_rep) in ((:gaussian, report.cases.gaussian),
+                                 (:bump, report.cases.bump))
             println("  case=", name)
-            println(
-                "    dE(t0) = ", case_rep.dE_t0,
-                ", max|dE| (first K states) = ", case_rep.max_abs_dE,
-                ", sign = ", case_rep.dE_sign
-            )
+            println("    dE(t0) = ", case_rep.dE_t0,
+                    ", max|dE| (first K states) = ", case_rep.max_abs_dE,
+                    ", sign = ", case_rep.dE_sign)
             println("    max|dE_interior - flux| = ", case_rep.max_abs_interior_minus_flux)
-            println(
-                "    max|SBP residual term| = ", case_rep.max_abs_sbp_residual_term,
-                ", max|(dE_interior - flux) - SBP| = ", case_rep.max_abs_interior_minus_flux_minus_sbp
-            )
-            println(
-                "    max|dE + flux| = ", case_rep.max_abs_total_plus_flux,
-                ", max|dE - flux| = ", case_rep.max_abs_total_minus_flux
-            )
-            println(
-                "    max|w_in - w_out| = ", case_rep.max_abs_win_minus_wout,
-                ", max|w_in + w_out| = ", case_rep.max_abs_win_plus_wout
-            )
-            println(
-                "    max|G*Pi0| = ", case_rep.max_abs_GPi0,
-                ", xi_growth_expected_from_pi0 = ", case_rep.xi_growth_expected_from_pi0
-            )
-            println(
-                "    potential residual l2 abs/rel = ",
-                case_rep.potential_consistency.residual_l2_abs, " / ",
-                case_rep.potential_consistency.residual_l2_rel
-            )
+            println("    max|SBP residual term| = ", case_rep.max_abs_sbp_residual_term,
+                    ", max|(dE_interior - flux) - SBP| = ",
+                    case_rep.max_abs_interior_minus_flux_minus_sbp)
+            println("    max|dE + flux| = ", case_rep.max_abs_total_plus_flux,
+                    ", max|dE - flux| = ", case_rep.max_abs_total_minus_flux)
+            println("    max|w_in - w_out| = ", case_rep.max_abs_win_minus_wout,
+                    ", max|w_in + w_out| = ", case_rep.max_abs_win_plus_wout)
+            println("    max|G*Pi0| = ", case_rep.max_abs_GPi0,
+                    ", psi_growth_expected_from_pi0 = ",
+                    case_rep.psi_growth_expected_from_pi0)
+            println("    potential residual l2 abs/rel = ",
+                    case_rep.potential_consistency.residual_l2_abs, " / ",
+                    case_rep.potential_consistency.residual_l2_rel)
             for wmsg in case_rep.potential_consistency.warnings
                 println("    warning: ", wmsg)
             end
-            println(
-                "    max step ΔE = ", case_rep.max_step_energy_increase,
-                ", min step ΔE = ", case_rep.min_step_energy_change
-            )
+            println("    max step ΔE = ", case_rep.max_step_energy_increase,
+                    ", min step ΔE = ", case_rep.min_step_energy_change)
 
             nshow = min(6, length(case_rep.early_rows))
             println("    early rows (k, t, dE, flux, dE+flux, dE_interior-flux, SBP, w_in, w_out, w_in-w_out)")
             for i in 1:nshow
                 row = case_rep.early_rows[i]
-                println(
-                    "      ", row.k, "  ", row.t, "  ", row.dE, "  ", row.flux,
-                    "  ", row.total_plus_flux, "  ", row.interior_minus_flux, "  ",
-                    row.sbp_residual_term, "  ", row.w_in, "  ", row.w_out, "  ", row.win_minus_wout
-                )
+                println("      ", row.k, "  ", row.t, "  ", row.dE, "  ", row.flux,
+                        "  ", row.total_plus_flux, "  ", row.interior_minus_flux, "  ",
+                        row.sbp_residual_term, "  ", row.w_in, "  ", row.w_out, "  ",
+                        row.win_minus_wout)
             end
         end
 
         println("  runtime operator checks")
-        println(
-            "    max|A_runtime - J_runtime| = ",
-            report.operator_consistency.runtime_vs_jacobian_maxabs,
-            " at ", report.operator_consistency.runtime_vs_jacobian_argmax
-        )
+        println("    max|A_runtime - J_runtime| = ",
+                report.operator_consistency.runtime_vs_jacobian_maxabs,
+                " at ", report.operator_consistency.runtime_vs_jacobian_argmax)
         println("    max|S| full = ", report.operator_consistency.skew_runtime.maxabs_full)
-        println("    max|S| no-origin = ", report.operator_consistency.skew_runtime.maxabs_no_origin)
+        println("    max|S| no-origin = ",
+                report.operator_consistency.skew_runtime.maxabs_no_origin)
         println("    max|S| safe = ", report.operator_consistency.skew_runtime.maxabs_safe)
-        println(
-            "    max|dE_rhs - 0.5*U'SU| gaussian/bump = ",
-            report.operator_consistency.skew_energy_partition.gaussian.max_abs_rhs_minus_quadratic, " / ",
-            report.operator_consistency.skew_energy_partition.bump.max_abs_rhs_minus_quadratic
-        )
-        println(
-            "    max|origin-coupling dE term| gaussian/bump = ",
-            report.operator_consistency.skew_energy_partition.gaussian.max_abs_quadratic_origin_coupling, " / ",
-            report.operator_consistency.skew_energy_partition.bump.max_abs_quadratic_origin_coupling
-        )
+        println("    max|dE_rhs - 0.5*U'SU| gaussian/bump = ",
+                report.operator_consistency.skew_energy_partition.gaussian.max_abs_rhs_minus_quadratic,
+                " / ",
+                report.operator_consistency.skew_energy_partition.bump.max_abs_rhs_minus_quadratic)
+        println("    max|origin-coupling dE term| gaussian/bump = ",
+                report.operator_consistency.skew_energy_partition.gaussian.max_abs_quadratic_origin_coupling,
+                " / ",
+                report.operator_consistency.skew_energy_partition.bump.max_abs_quadratic_origin_coupling)
 
         if run_dt_scaling
             println("  dt scaling (gaussian)")
             for row in report.dt_scaling.rows
-                println(
-                    "    dt=", row.dt, "  max|dE_rhs|=", row.max_abs_dE_rhs,
-                    "  dE_sign=", row.dE_sign, "  max step ΔE=", row.max_step_energy_increase
-                )
+                println("    dt=", row.dt, "  max|dE_rhs|=", row.max_abs_dE_rhs,
+                        "  dE_sign=", row.dE_sign, "  max step ΔE=",
+                        row.max_step_energy_increase)
             end
-            println("    ratio max|dE_rhs|(dt)/max|dE_rhs|(dt/2) = ", report.dt_scaling.ratio_dt_to_dt2)
+            println("    ratio max|dE_rhs|(dt)/max|dE_rhs|(dt/2) = ",
+                    report.dt_scaling.ratio_dt_to_dt2)
         end
 
         if report.bigfloat.enabled

@@ -52,17 +52,60 @@ using SphericalSBPOperators
 using SummationByPartsOperators: MattssonNordström2004
 
 source = MattssonNordström2004()
-ops = spherical_operators(source;
+ops = diagonal_spherical_operators(source;
     accuracy_order = 4,
     N = 64,
     R = 1.0,
     p = 2,
-    build_matrix = :probe,
 )
 
 report = validate(ops; verbose = true)
 diag = diagnose(ops, report; Ktest = 8, verbose = true)
 ```
+
+## Experimental diagonal path
+
+`diagonal_exp_spherical_operators(...)` builds the same diagonal-mass family, but
+widens the exact coupled near-origin repair by two additional rows. On that enlarged
+block it enforces the same:
+
+- even-monomial gradient constraints used for `Geven`,
+- odd-monomial divergence constraints used through the SBP relation for `D`.
+
+Because `D` depends on `G_even^T`, the experimental path also searches over the
+extra repaired-row stencil columns and picks an exact coupled solve that reduces the
+first downstream odd-monomial divergence residuals, instead of always using the
+nearest contiguous stencil.
+
+Use it the same way as the standard constructor:
+
+```julia
+ops_exp = diagonal_exp_spherical_operators(source;
+    accuracy_order = 4,
+    N = 64,
+    R = 1.0,
+    p = 2,
+)
+```
+
+To inspect the experimental closure diagnostics, request the repair metadata:
+
+```julia
+exp_build = diagonal_exp_spherical_operators(source;
+    accuracy_order = 4,
+    N = 64,
+    R = 1.0,
+    p = 2,
+    return_repair_info = true,
+)
+
+ops_exp = exp_build.ops
+repair_info = exp_build.repair_info
+```
+
+`repair_info` includes the repaired rows, affected divergence rows inferred from the
+chosen stencil columns, exact rank/consistency checks for the coupled closure system,
+and SBP moment-compatibility residuals for the imposed monomial pairs.
 
 ## Exact rational mode
 
@@ -70,7 +113,7 @@ Numeric type is inferred from inputs similarly to `SummationByPartsOperators`.
 If `R` is rational, operators are built with rational arithmetic.
 
 ```julia
-ops_exact = spherical_operators(source;
+ops_exact = diagonal_spherical_operators(source;
     accuracy_order = 4,
     N = 16,
     R = 1//1,

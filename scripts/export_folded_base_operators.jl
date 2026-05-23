@@ -22,7 +22,7 @@ function _construct_source_instance(T::DataType)
             end
         end
         return (ok = false, source = nothing,
-            reason = "no compatible Symbol constructor argument")
+                reason = "no compatible Symbol constructor argument")
     end
 
     return (ok = false, source = nothing, reason = "no zero-arg/Symbol constructor")
@@ -59,7 +59,8 @@ end
 function _parse_real_arg(s::AbstractString)
     occursin("//", s) && begin
         parts = split(s, "//")
-        length(parts) == 2 || throw(ArgumentError("Invalid rational format `$s`; use `a//b`."))
+        length(parts) == 2 ||
+            throw(ArgumentError("Invalid rational format `$s`; use `a//b`."))
         num = parse(Int, strip(parts[1]))
         den = parse(Int, strip(parts[2]))
         den == 0 && throw(ArgumentError("Rational denominator cannot be zero in `$s`."))
@@ -106,14 +107,12 @@ function _mma_matrix(A::AbstractMatrix{<:Real})
 end
 
 function _build_mma_block(r_vec, G_even_dense, G_odd_dense, H_dense;
-        D_dense::Union{Nothing, AbstractMatrix{<:Real}} = nothing)
-    blocks = String[
-        "(* Mathematica-ready folded operators *)",
-        string("r = ", _mma_vector(r_vec), ";"),
-        string("GEven = ", _mma_matrix(G_even_dense), ";"),
-        string("GOdd = ", _mma_matrix(G_odd_dense), ";"),
-        string("HcartDiagRp = ", _mma_matrix(H_dense), ";"),
-    ]
+                          D_dense::Union{Nothing, AbstractMatrix{<:Real}} = nothing)
+    blocks = String["(* Mathematica-ready folded operators *)",
+                    string("r = ", _mma_vector(r_vec), ";"),
+                    string("GEven = ", _mma_matrix(G_even_dense), ";"),
+                    string("GOdd = ", _mma_matrix(G_odd_dense), ";"),
+                    string("HcartDiagRp = ", _mma_matrix(H_dense), ";")]
     if D_dense !== nothing
         push!(blocks, string("DIV = ", _mma_matrix(D_dense), ";"))
     end
@@ -121,22 +120,19 @@ function _build_mma_block(r_vec, G_even_dense, G_odd_dense, H_dense;
 end
 
 function _raw_folded_base_operators(source;
-        accuracy_order::Int,
-        N::Int,
-        R::Real,
-        p::Int,
-        mode = SafeMode(),
-        build_matrix::Symbol = :probe,
-        snap_factor::Float64 = 64.0,
-        return_canonical::Bool = false)
+                                    accuracy_order::Int,
+                                    N::Int,
+                                    R::Real,
+                                    p::Int,
+                                    mode = SafeMode(),
+                                    snap_factor::Float64 = 64.0,
+                                    return_canonical::Bool = false)
     R_canonical = big(Int(N)) // 1
-    Dfull, xfull, Gfull, Hfull = SphericalSBPOperators._build_full_grid_objects(
-        source;
-        accuracy_order = Int(accuracy_order),
-        N = Int(N),
-        R = R_canonical,
-        mode = mode,
-        build_matrix = build_matrix)
+    Dfull, xfull, Gfull, Hfull = SphericalSBPOperators._build_full_grid_objects(source;
+                                                                                accuracy_order = Int(accuracy_order),
+                                                                                N = Int(N),
+                                                                                R = R_canonical,
+                                                                                mode = mode)
 
     T = eltype(xfull)
     atol_construct = if isdefined(SphericalSBPOperators, Symbol("_resolve_atol"))
@@ -147,7 +143,8 @@ function _raw_folded_base_operators(source;
         zero(T)
     end
 
-    r, Rop, Eeven, Eodd = SphericalSBPOperators._build_folding_operators(xfull; atol = atol_construct)
+    r, Rop, Eeven, Eodd = SphericalSBPOperators._build_folding_operators(xfull;
+                                                                         atol = atol_construct)
     Geven_raw = sparse(Rop * Gfull * Eeven)
     Godd_raw = sparse(Rop * Gfull * Eodd)
     snap_sparse!(Geven_raw; snap_factor = snap_factor)
@@ -178,7 +175,8 @@ function _raw_folded_base_operators(source;
     snap_sparse!(S_scaled; snap_factor = snap_factor)
     snap_sparse!(V_scaled; snap_factor = snap_factor)
 
-    return (r = r_scaled, Geven = Geven_scaled, Godd = Godd_scaled, S = S_scaled, V = V_scaled)
+    return (r = r_scaled, Geven = Geven_scaled, Godd = Godd_scaled, S = S_scaled,
+            V = V_scaled)
 end
 
 """
@@ -188,46 +186,42 @@ Build diagonal folded operators and print Mathematica-ready assignments directly
 to stdout, for copy/paste into a REPL/notebook.
 """
 function print_folded_base_operators_mma(;
-        source_name::String = "MattssonNordström2004",
-        accuracy_order::Int = 6,
-        N::Int = 31,
-        R::Real = 1.0,
-        p::Int = 2,
-        return_canonical::Bool = false,
-        raw_folded::Bool = true)
+                                         source_name::String = "MattssonNordström2004",
+                                         accuracy_order::Int = 6,
+                                         N::Int = 31,
+                                         R::Real = 1.0,
+                                         p::Int = 2,
+                                         return_canonical::Bool = false,
+                                         raw_folded::Bool = true)
     src, available = _resolve_source(source_name)
     src === nothing &&
-        throw(ArgumentError(
-            "Unknown source `$source_name`.\nAvailable source labels:\n  " *
-            join(sort!(available), "\n  ")
-        ))
+        throw(ArgumentError("Unknown source `$source_name`.\nAvailable source labels:\n  " *
+                            join(sort!(available), "\n  ")))
 
     ops = if raw_folded
         _raw_folded_base_operators(src;
-            accuracy_order = accuracy_order,
-            N = N,
-            R = R,
-            p = p,
-            mode = SafeMode(),
-            build_matrix = :probe,
-            return_canonical = return_canonical)
+                                   accuracy_order = accuracy_order,
+                                   N = N,
+                                   R = R,
+                                   p = p,
+                                   mode = SafeMode(),
+                                   return_canonical = return_canonical)
     else
-        spherical_operators(src;
-            accuracy_order = accuracy_order,
-            N = N,
-            R = R,
-            p = p,
-            mode = SafeMode(),
-            return_canonical = return_canonical)
+        diagonal_spherical_operators(src;
+                            accuracy_order = accuracy_order,
+                            N = N,
+                            R = R,
+                            p = p,
+                            mode = SafeMode(),
+                            return_canonical = return_canonical)
     end
 
     D_dense = raw_folded ? nothing : Matrix(ops.D)
-    block = _build_mma_block(
-        collect(ops.r),
-        Matrix(ops.Geven),
-        Matrix(ops.Godd),
-        Matrix(ops.S);
-        D_dense = D_dense)
+    block = _build_mma_block(collect(ops.r),
+                             Matrix(ops.Geven),
+                             Matrix(ops.Godd),
+                             Matrix(ops.S);
+                             D_dense = D_dense)
     println(block)
     return block
 end
@@ -243,43 +237,41 @@ Build diagonal-mass folded spherical operators and export:
 Also exports `r` and sparse-triplet versions for easy Mathematica import.
 """
 function export_folded_base_operators(;
-        source_name::String = "MattssonNordström2004",
-        accuracy_order::Int = 6,
-        N::Int = 31,
-        R::Real = 1.0,
-        p::Int = 2,
-        outdir::String = joinpath("papers", "mathematica_folded_ops"),
-        return_canonical::Bool = false,
-        print_mma_to_stdout::Bool = true,
-        raw_folded::Bool = true)
+                                      source_name::String = "MattssonNordström2004",
+                                      accuracy_order::Int = 6,
+                                      N::Int = 31,
+                                      R::Real = 1.0,
+                                      p::Int = 2,
+                                      outdir::String = joinpath("papers",
+                                                                "mathematica_folded_ops"),
+                                      return_canonical::Bool = false,
+                                      print_mma_to_stdout::Bool = true,
+                                      raw_folded::Bool = true)
     N > 0 || throw(ArgumentError("`N` must be positive."))
     accuracy_order > 0 || throw(ArgumentError("`accuracy_order` must be positive."))
     p >= 0 || throw(ArgumentError("`p` must be nonnegative."))
 
     src, available = _resolve_source(source_name)
     src === nothing &&
-        throw(ArgumentError(
-            "Unknown source `$source_name`.\nAvailable source labels:\n  " *
-            join(sort!(available), "\n  ")
-        ))
+        throw(ArgumentError("Unknown source `$source_name`.\nAvailable source labels:\n  " *
+                            join(sort!(available), "\n  ")))
 
     ops = if raw_folded
         _raw_folded_base_operators(src;
-            accuracy_order = accuracy_order,
-            N = N,
-            R = R,
-            p = p,
-            mode = SafeMode(),
-            build_matrix = :probe,
-            return_canonical = return_canonical)
+                                   accuracy_order = accuracy_order,
+                                   N = N,
+                                   R = R,
+                                   p = p,
+                                   mode = SafeMode(),
+                                   return_canonical = return_canonical)
     else
-        spherical_operators(src;
-            accuracy_order = accuracy_order,
-            N = N,
-            R = R,
-            p = p,
-            mode = SafeMode(),
-            return_canonical = return_canonical)
+        diagonal_spherical_operators(src;
+                            accuracy_order = accuracy_order,
+                            N = N,
+                            R = R,
+                            p = p,
+                            mode = SafeMode(),
+                            return_canonical = return_canonical)
     end
 
     # In the diagonal construction, this is exactly H_cartesian_half * diag(r^p).
@@ -328,12 +320,11 @@ function export_folded_base_operators(;
 
     maxabs_sv = maximum(abs.(Matrix(ops.S - ops.V)))
 
-    mma_block = _build_mma_block(
-        r_vec,
-        G_even_dense,
-        G_odd_dense,
-        H_dense;
-        D_dense = D_dense)
+    mma_block = _build_mma_block(r_vec,
+                                 G_even_dense,
+                                 G_odd_dense,
+                                 H_dense;
+                                 D_dense = D_dense)
 
     open(mma_path, "w") do io
         println(io, mma_block)
@@ -348,7 +339,8 @@ function export_folded_base_operators(;
         println(io, "return_canonical=", return_canonical)
         println(io, "mode=SafeMode()")
         println(io, "raw_folded=", raw_folded)
-        println(io, "note=H_cartesian_half*diag(r^p) is exported as ops.S in diagonal construction")
+        println(io,
+                "note=H_cartesian_half*diag(r^p) is exported as ops.S in diagonal construction")
         println(io, "maxabs(S-V)=", maxabs_sv)
         println(io, "nnz(G_even)=", nnz_ge)
         println(io, "nnz(G_odd)=", nnz_go)
@@ -381,17 +373,17 @@ function export_folded_base_operators(;
     end
 
     return (;
-        r_path,
-        g_even_path,
-        g_odd_path,
-        h_path,
-        g_even_triplet_path,
-        g_odd_triplet_path,
-        h_triplet_path,
-        d_path,
-        d_triplet_path,
-        mma_path,
-        meta_path)
+            r_path,
+            g_even_path,
+            g_odd_path,
+            h_path,
+            g_even_triplet_path,
+            g_odd_triplet_path,
+            h_triplet_path,
+            d_path,
+            d_triplet_path,
+            mma_path,
+            meta_path)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
@@ -408,23 +400,23 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     if print_only
         print_folded_base_operators_mma(;
-            source_name = source_name,
-            accuracy_order = accuracy_order,
-            N = N,
-            R = R,
-            p = p,
-            return_canonical = return_canonical,
-            raw_folded = raw_folded)
+                                        source_name = source_name,
+                                        accuracy_order = accuracy_order,
+                                        N = N,
+                                        R = R,
+                                        p = p,
+                                        return_canonical = return_canonical,
+                                        raw_folded = raw_folded)
     else
         export_folded_base_operators(;
-            source_name = source_name,
-            accuracy_order = accuracy_order,
-            N = N,
-            R = R,
-            p = p,
-            outdir = outdir,
-            return_canonical = return_canonical,
-            print_mma_to_stdout = print_mma_to_stdout,
-            raw_folded = raw_folded)
+                                     source_name = source_name,
+                                     accuracy_order = accuracy_order,
+                                     N = N,
+                                     R = R,
+                                     p = p,
+                                     outdir = outdir,
+                                     return_canonical = return_canonical,
+                                     print_mma_to_stdout = print_mma_to_stdout,
+                                     raw_folded = raw_folded)
     end
 end

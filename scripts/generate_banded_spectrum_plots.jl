@@ -1,9 +1,14 @@
 using CairoMakie
+using LaTeXStrings: @L_str, latexstring
 using Printf: @printf, @sprintf
 
 # Reuse the exact same banded-operator construction and high-precision
 # spectrum helpers used for the table generation pipeline.
 include(joinpath(@__DIR__, "generate_banded_spectrum_tables.jl"))
+
+if !isdefined(@__MODULE__, :SphericalSBPOperators)
+    @eval using SphericalSBPOperators
+end
 
 const _APS_REVTeX_COLUMNWIDTH_PT = 246.0
 const _APS_REVTeX_TEXTWIDTH_PT = 510.0
@@ -11,10 +16,25 @@ const _REF_BG = RGBf(1.0, 1.0, 1.0)
 const _REF_GRID = RGBAf(0.0, 0.0, 0.0, 0.10)
 const _REF_ZERO = RGBAf(0.0, 0.0, 0.0, 0.35)
 const _DEFAULT_PAPER_PLOTS_DIR = "/home/svretina/PhD/mypapers/Spherical-SBP-Operators-Paper/plots"
+const _REF_COLORS = [RGBAf(0.298039, 0.447059, 0.690196, 1.0),
+                     RGBAf(0.866667, 0.517647, 0.321569, 1.0),
+                     RGBAf(0.333333, 0.658824, 0.407843, 1.0),
+                     RGBAf(0.768627, 0.305882, 0.321569, 1.0),
+                     RGBAf(0.505882, 0.447059, 0.701961, 1.0),
+                     RGBAf(0.576471, 0.470588, 0.376471, 1.0),
+                     RGBAf(0.854902, 0.545098, 0.764706, 1.0),
+                     RGBAf(0.54902, 0.54902, 0.54902, 1.0),
+                     RGBAf(0.8, 0.72549, 0.454902, 1.0),
+                     RGBAf(0.392157, 0.709804, 0.803922, 1.0)]
+const _REF_MARKERS = [:circle, :rect, :dtriangle, :utriangle, :cross,
+                      :diamond, :ltriangle, :rtriangle, :pentagon,
+                      :xcross, :hexagon]
 
-@inline function _with_custom_theme(f::Function)
+@inline function _with_custom_theme(f::Function; kwargs...)
     return with_theme(SphericalSBPOperators.mytheme_aps()) do
-        f()
+        with_theme(SphericalSBPOperators.mytheme_aps_spectrum(; kwargs...)) do
+            f()
+        end
     end
 end
 
@@ -31,7 +51,8 @@ function _revtex_aps_figure_size(width_mode::Symbol, aspect_ratio::Float64)
     return (round(Int, width_pt), round(Int, height_pt))
 end
 
-@inline function _to_complex64(vals::AbstractVector{<:Complex}; tiny_zero_tol::Float64=1e-16)
+@inline function _to_complex64(vals::AbstractVector{<:Complex};
+                               tiny_zero_tol::Float64 = 1e-16)
     out = Vector{ComplexF64}(undef, length(vals))
     @inbounds for i in eachindex(vals)
         re = Float64(real(vals[i]))
@@ -47,7 +68,7 @@ end
     return out
 end
 
-function _axis_limits(series::AbstractVector; pad_frac::Float64=0.10)
+function _axis_limits(series::AbstractVector; pad_frac::Float64 = 0.10)
     xall = Float64[]
     yall = Float64[]
     for row in series
@@ -65,10 +86,17 @@ function _axis_limits(series::AbstractVector; pad_frac::Float64=0.10)
     return xmin - xpad, xmax + xpad, ymin - ypad, ymax + ypad
 end
 
-@inline _plot_cite_key(label::String) = get(_SOURCE_TO_CITE, label, label)
+@inline _plot_short_name(label::String) = get(_SOURCE_TO_SHORT, label, label)
+@inline _legend_entry(label::String) = latexstring("\\mathrm{", label, "}")
+
+@inline function _series_style(idx::Int)
+    return (color = _REF_COLORS[mod1(idx, length(_REF_COLORS))],
+            marker = _REF_MARKERS[mod1(idx, length(_REF_MARKERS))])
+end
 
 function _sort_series!(series::Vector)
-    sort!(series; by = row -> (get(_CITE_SORT_INDEX, row.cite_key, 10_000), row.source_label))
+    sort!(series;
+          by = row -> (get(_SHORT_SORT_INDEX, row.short_name, 10_000), row.source_label))
     return series
 end
 
@@ -77,14 +105,12 @@ function _build_diagonal_ops(source, order::Int;
                              R::Rational{BigInt},
                              p::Int,
                              mode)
-    return spherical_operators(
-        source;
-        accuracy_order = order,
-        N = points,
-        R = R,
-        p = p,
-        mode = mode
-    )
+    return SphericalSBPOperators.diagonal_spherical_operators(source;
+                                                     accuracy_order = order,
+                                                     N = points,
+                                                     R = R,
+                                                     p = p,
+                                                     mode = mode)
 end
 
 @inline function _method_tag(method::Symbol)
@@ -164,77 +190,53 @@ end
 
 function _save_overlay_plot(series::AbstractVector,
                             path::AbstractString;
-                            title::AbstractString,
-                            width_mode::Symbol=:twocolumn,
-                            aspect_ratio::Float64=0.70,
-                            markersize::Real=8,
-                            axis_labelsize::Real=13,
-                            tick_labelsize::Real=12,
-                            title_size::Real=16,
-                            legend_labelsize::Real=10)
+                            title,
+                            width_mode::Symbol = :twocolumn,
+                            aspect_ratio::Float64 = 0.70,
+                            markersize::Real = 8,
+                            axis_labelsize::Real = 13,
+                            tick_labelsize::Real = 12,
+                            title_size::Real = 16,
+                            legend_labelsize::Real = 10)
     isempty(series) && throw(ArgumentError("Cannot plot empty spectrum series."))
 
     mkpath(dirname(path))
+    fig_padding = (8, 8, 6, 6)
 
-    _with_custom_theme() do
+    _with_custom_theme(axis_labelsize = axis_labelsize,
+                       tick_labelsize = tick_labelsize,
+                       title_size = title_size,
+                       legend_labelsize = legend_labelsize,
+                       figure_padding = fig_padding,
+                       backgroundcolor = _REF_BG,
+                       gridcolor = _REF_GRID) do
         fig_size = _revtex_aps_figure_size(width_mode, aspect_ratio)
-        fig_padding = (8, 8, 6, 6)
-        fig = Figure(
-            size = fig_size,
-            figure_padding = fig_padding,
-            backgroundcolor = _REF_BG
-        )
+        fig = Figure(size = fig_size)
         ax = Axis(fig[1, 1],
-                  xlabel = "Re(λ)",
-                  ylabel = "Im(λ)",
-                  title = title,
-                  backgroundcolor = _REF_BG,
-                  xlabelsize = axis_labelsize,
-                  ylabelsize = axis_labelsize,
-                  xticklabelsize = tick_labelsize,
-                  yticklabelsize = tick_labelsize,
-                  titlesize = title_size,
-                  spinewidth = 1.8,
-                  xgridvisible = true,
-                  ygridvisible = true,
-                  xgridcolor = _REF_GRID,
-                  ygridcolor = _REF_GRID,
-                  xgridwidth = 1.0,
-                  ygridwidth = 1.0,
-                  xminorticksvisible = true,
-                  yminorticksvisible = true,
-                  xminorticks = IntervalsBetween(5),
-                  yminorticks = IntervalsBetween(5),
-                  xminortickalign = 1.0,
-                  yminortickalign = 1.0,
-                  xminorticksize = 4,
-                  yminorticksize = 4,
-                  xminortickwidth = 1.1,
-                  yminortickwidth = 1.1,
-                  xtickalign = 1.0,
-                  ytickalign = 1.0,
-                  xticksmirrored = true,
-                  yticksmirrored = true,
-                  xticksize = 8,
-                  yticksize = 8,
-                  xtickwidth = 1.3,
-                  ytickwidth = 1.3)
+                  xlabel = L"\mathrm{Re}(\lambda)",
+                  ylabel = L"\mathrm{Im}(\lambda)",
+                  title = title)
 
         seen_labels = Set{String}()
-        for row in series
+        for (idx, row) in enumerate(series)
+            style = _series_style(idx)
             legend_label = if row.legend_label in seen_labels
                 nothing
             else
                 push!(seen_labels, row.legend_label)
-                row.legend_label
+                _legend_entry(row.legend_label)
             end
 
             if isnothing(legend_label)
                 scatter!(ax, real.(row.eigvals), imag.(row.eigvals);
-                         markersize = markersize)
+                         markersize = markersize,
+                         color = style.color,
+                         marker = style.marker)
             else
                 scatter!(ax, real.(row.eigvals), imag.(row.eigvals);
                          markersize = markersize,
+                         color = style.color,
+                         marker = style.marker,
                          label = legend_label)
             end
         end
@@ -249,36 +251,48 @@ function _save_overlay_plot(series::AbstractVector,
         labels_sorted = sort!(collect(seen_labels))
         patch_size = (30, 16)
         col_gap = 12
-        legend_nbanks = _legend_nbanks(
-            labels_sorted;
-            figure_size = fig_size,
-            figure_padding = fig_padding,
-            labelsize = legend_labelsize,
-            patchsize = patch_size,
-            colgap = col_gap
-        )
+        legend_nbanks = _legend_nbanks(labels_sorted;
+                                       figure_size = fig_size,
+                                       figure_padding = fig_padding,
+                                       labelsize = legend_labelsize,
+                                       patchsize = patch_size,
+                                       colgap = col_gap)
 
-        Legend(
-            fig[2, 1],
-            ax;
-            orientation = :horizontal,
-            framevisible = false,
-            labelsize = legend_labelsize,
-            patchsize = patch_size,
-            rowgap = 2,
-            colgap = col_gap,
-            nbanks = legend_nbanks,
-            margin = (0, 0, 0, 0),
-            padding = (2, 2, 2, 2),
-            tellheight = true,
-            tellwidth = false
-        )
+        Legend(fig[2, 1],
+               ax;
+               orientation = :horizontal,
+               nbanks = legend_nbanks,
+               tellheight = true,
+               tellwidth = false)
         rowsize!(fig.layout, 2, Auto(0.12))
 
         # Export in physical points for direct compatibility with REVTeX widths.
-        save(path, fig; pt_per_unit = 1.0)
+        CairoMakie.save(path, fig; pt_per_unit = 1.0)
     end
     return path
+end
+
+function _maybe_save_overlay_plot(series::AbstractVector,
+                                  path::AbstractString;
+                                  title,
+                                  width_mode::Symbol = :twocolumn,
+                                  axis_labelsize::Real = 13,
+                                  tick_labelsize::Real = 12,
+                                  title_size::Real = 16,
+                                  legend_labelsize::Real = 10)
+    if isempty(series)
+        @warn "Skipping empty spectrum series." path = path title = title
+        return nothing
+    end
+
+    return _save_overlay_plot(series,
+                              path;
+                              title = title,
+                              width_mode = width_mode,
+                              axis_labelsize = axis_labelsize,
+                              tick_labelsize = tick_labelsize,
+                              title_size = title_size,
+                              legend_labelsize = legend_labelsize)
 end
 
 function _collect_method_spectra(order::Int;
@@ -304,7 +318,7 @@ function _collect_method_spectra(order::Int;
 
     for source in gathered.sources
         source_label = _source_label(source)
-        cite_key = _plot_cite_key(source_label)
+        short_name = _plot_short_name(source_label)
         try
             ops = builder(source, order; points = points, R = R, p = p, mode = mode)
 
@@ -312,25 +326,31 @@ function _collect_method_spectra(order::Int;
             L_rad = _assemble_hyperbolic_block(ops; bc = :absorbing)
             L_lap = Matrix(ops.D * ops.Geven)
 
-            λ_ref = _to_complex64(_high_precision_schur_values(L_ref); tiny_zero_tol = tiny_zero_tol)
-            λ_rad = _to_complex64(_high_precision_schur_values(L_rad); tiny_zero_tol = tiny_zero_tol)
-            λ_lap = _to_complex64(_high_precision_schur_values(L_lap); tiny_zero_tol = tiny_zero_tol)
+            λ_ref = _to_complex64(_high_precision_schur_values(L_ref);
+                                  tiny_zero_tol = tiny_zero_tol)
+            λ_rad = _to_complex64(_high_precision_schur_values(L_rad);
+                                  tiny_zero_tol = tiny_zero_tol)
+            λ_lap = _to_complex64(_high_precision_schur_values(L_lap);
+                                  tiny_zero_tol = tiny_zero_tol)
 
-            push!(hyper_reflective, (;
-                                     source_label = source_label,
-                                     cite_key = cite_key,
-                                     legend_label = cite_key,
-                                     eigvals = λ_ref))
-            push!(hyper_radiative, (;
-                                    source_label = source_label,
-                                    cite_key = cite_key,
-                                    legend_label = cite_key,
-                                    eigvals = λ_rad))
-            push!(laplacian, (;
-                              source_label = source_label,
-                              cite_key = cite_key,
-                              legend_label = cite_key,
-                              eigvals = λ_lap))
+            push!(hyper_reflective,
+                  (;
+                   source_label = source_label,
+                   short_name = short_name,
+                   legend_label = short_name,
+                   eigvals = λ_ref))
+            push!(hyper_radiative,
+                  (;
+                   source_label = source_label,
+                   short_name = short_name,
+                   legend_label = short_name,
+                   eigvals = λ_rad))
+            push!(laplacian,
+                  (;
+                   source_label = source_label,
+                   short_name = short_name,
+                   legend_label = short_name,
+                   eigvals = λ_lap))
         catch err
             push!(failures, (; label = source_label, error = sprint(showerror, err)))
         end
@@ -340,31 +360,33 @@ function _collect_method_spectra(order::Int;
     _sort_series!(hyper_radiative)
     _sort_series!(laplacian)
 
-    return (
-        hyper_reflective = hyper_reflective,
-        hyper_radiative = hyper_radiative,
-        laplacian = laplacian,
-        failures = failures,
-        total_sources = length(gathered.sources),
-    )
+    return (hyper_reflective = hyper_reflective,
+            hyper_radiative = hyper_radiative,
+            laplacian = laplacian,
+            failures = failures,
+            total_sources = length(gathered.sources))
 end
 
 function generate_method_spectrum_plots(;
-                                        method::Symbol=:banded,
-                                        orders::Tuple{Vararg{Int}}=(4, 6),
-                                        points::Int=31,
-                                        p::Int=2,
-                                        R::Rational{BigInt}=big(30) // big(1),
-                                        tiny_zero_tol::Float64=1e-16,
-                                        mode=SafeMode(),
-                                        width_mode::Symbol=:twocolumn,
-                                        out_dir::AbstractString=_default_out_dir(method),
-                                        export_plots_dir::Union{Nothing, AbstractString}=_DEFAULT_PAPER_PLOTS_DIR)
+                                        method::Symbol = :banded,
+                                        orders::Tuple{Vararg{Int}} = (4, 6),
+                                        points::Int = 31,
+                                        p::Int = 2,
+                                        R::Rational{BigInt} = big(30) // big(1),
+                                        tiny_zero_tol::Float64 = 1e-16,
+                                        mode = SafeMode(),
+                                        width_mode::Symbol = :twocolumn,
+                                        out_dir::AbstractString = _default_out_dir(method),
+                                        export_plots_dir::Union{Nothing, AbstractString} = _DEFAULT_PAPER_PLOTS_DIR,
+                                        axis_labelsize::Real = 13,
+                                        tick_labelsize::Real = 12,
+                                        title_size::Real = 16,
+                                        legend_labelsize::Real = 10)
     mkpath(out_dir)
     method_tag = _method_tag(method)
     rtoken = _R_token(R)
 
-    outputs = Dict{Int,Any}()
+    outputs = Dict{Int, Any}()
     for order in orders
         data = _collect_method_spectra(order;
                                        method = method,
@@ -374,38 +396,49 @@ function generate_method_spectrum_plots(;
                                        mode = mode,
                                        tiny_zero_tol = tiny_zero_tol)
 
-        out_ref = joinpath(out_dir, "hyperbolic_block_reflective_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
-        out_rad = joinpath(out_dir, "hyperbolic_block_radiative_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
-        out_lap = joinpath(out_dir, "laplacian_divg_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
+        out_ref = joinpath(out_dir,
+                           "hyperbolic_block_reflective_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
+        out_rad = joinpath(out_dir,
+                           "hyperbolic_block_radiative_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
+        out_lap = joinpath(out_dir,
+                           "laplacian_divg_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
 
-        _save_overlay_plot(
-            data.hyper_reflective,
-            out_ref;
-            width_mode = width_mode,
-            title = "Hyperbolic block spectrum (reflective)"
-        )
-        _save_overlay_plot(
-            data.hyper_radiative,
-            out_rad;
-            width_mode = width_mode,
-            title = "Hyperbolic block spectrum (radiative)"
-        )
-        _save_overlay_plot(
-            data.laplacian,
-            out_lap;
-            width_mode = width_mode,
-            title = "Laplacian spectrum"
-        )
-        _export_plots_to_dir([out_ref, out_rad, out_lap], method, export_plots_dir)
+        ref_path = _maybe_save_overlay_plot(data.hyper_reflective,
+                                            out_ref;
+                                            width_mode = width_mode,
+                                            axis_labelsize = axis_labelsize,
+                                            tick_labelsize = tick_labelsize,
+                                            title_size = title_size,
+                                            legend_labelsize = legend_labelsize,
+                                            title = L"\mathrm{Hyperbolic\ block\ spectrum\ (reflective)}")
+        rad_path = _maybe_save_overlay_plot(data.hyper_radiative,
+                                            out_rad;
+                                            width_mode = width_mode,
+                                            axis_labelsize = axis_labelsize,
+                                            tick_labelsize = tick_labelsize,
+                                            title_size = title_size,
+                                            legend_labelsize = legend_labelsize,
+                                            title = L"\mathrm{Hyperbolic\ block\ spectrum\ (radiative)}")
+        lap_path = _maybe_save_overlay_plot(data.laplacian,
+                                            out_lap;
+                                            width_mode = width_mode,
+                                            axis_labelsize = axis_labelsize,
+                                            tick_labelsize = tick_labelsize,
+                                            title_size = title_size,
+                                            legend_labelsize = legend_labelsize,
+                                            title = L"\mathrm{Laplacian\ spectrum}")
+        paths_to_export = String[]
+        !isnothing(ref_path) && push!(paths_to_export, ref_path)
+        !isnothing(rad_path) && push!(paths_to_export, rad_path)
+        !isnothing(lap_path) && push!(paths_to_export, lap_path)
+        _export_plots_to_dir(paths_to_export, method, export_plots_dir)
 
-        outputs[order] = (
-            reflective_plot = out_ref,
-            radiative_plot = out_rad,
-            laplacian_plot = out_lap,
-            success_count = length(data.laplacian),
-            total_sources = data.total_sources,
-            failures = data.failures,
-        )
+        outputs[order] = (reflective_plot = ref_path,
+                          radiative_plot = rad_path,
+                          laplacian_plot = lap_path,
+                          success_count = length(data.laplacian),
+                          total_sources = data.total_sources,
+                          failures = data.failures)
 
         @printf("order=%d plot summary: %d/%d sources succeeded, %d failed\n",
                 order, length(data.laplacian), data.total_sources, length(data.failures))
@@ -418,14 +451,14 @@ function generate_method_spectrum_plots(;
 end
 
 function generate_banded_spectrum_plots(;
-                                        points::Int=31,
-                                        p::Int=2,
-                                        R::Rational{BigInt}=big(30) // big(1),
-                                        tiny_zero_tol::Float64=1e-16,
-                                        mode=SafeMode(),
-                                        width_mode::Symbol=:twocolumn,
-                                        out_dir::AbstractString=_default_out_dir(:banded),
-                                        export_plots_dir::Union{Nothing, AbstractString}=_DEFAULT_PAPER_PLOTS_DIR)
+                                        points::Int = 31,
+                                        p::Int = 2,
+                                        R::Rational{BigInt} = big(30) // big(1),
+                                        tiny_zero_tol::Float64 = 1e-16,
+                                        mode = SafeMode(),
+                                        width_mode::Symbol = :twocolumn,
+                                        out_dir::AbstractString = _default_out_dir(:banded),
+                                        export_plots_dir::Union{Nothing, AbstractString} = _DEFAULT_PAPER_PLOTS_DIR)
     return generate_method_spectrum_plots(;
                                           method = :banded,
                                           orders = (4, 6),
@@ -440,14 +473,14 @@ function generate_banded_spectrum_plots(;
 end
 
 function generate_diagonal_spectrum_plots(;
-                                          points::Int=31,
-                                          p::Int=2,
-                                          R::Rational{BigInt}=big(30) // big(1),
-                                          tiny_zero_tol::Float64=1e-16,
-                                          mode=SafeMode(),
-                                          width_mode::Symbol=:twocolumn,
-                                          out_dir::AbstractString=_default_out_dir(:diagonal),
-                                          export_plots_dir::Union{Nothing, AbstractString}=_DEFAULT_PAPER_PLOTS_DIR)
+                                          points::Int = 31,
+                                          p::Int = 2,
+                                          R::Rational{BigInt} = big(30) // big(1),
+                                          tiny_zero_tol::Float64 = 1e-16,
+                                          mode = SafeMode(),
+                                          width_mode::Symbol = :twocolumn,
+                                          out_dir::AbstractString = _default_out_dir(:diagonal),
+                                          export_plots_dir::Union{Nothing, AbstractString} = _DEFAULT_PAPER_PLOTS_DIR)
     return generate_method_spectrum_plots(;
                                           method = :diagonal,
                                           orders = (4, 6, 8),

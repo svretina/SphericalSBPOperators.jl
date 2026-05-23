@@ -30,7 +30,8 @@ Structure:
 - `V[4,5] = V[5,4] = v_4_5`
 - `V[i,i] = s_i` for `i >= 6`
 """
-function sbp4_vector_mass(; N::Integer = 10,
+function sbp4_vector_mass(;
+                          N::Integer = 10,
                           v_symbol_prefix::AbstractString = "v",
                           s_symbol_prefix::AbstractString = "s")
     Nint = Int(N)
@@ -94,18 +95,17 @@ function sbp4_vector_mass(; N::Integer = 10,
     Nint >= 5 && push!(v_offdiag_symbols, v45_symbol)
 
     free_symbols = vcat(s_diag_symbols, v_diag_symbols, v_offdiag_symbols)
-    symbol_to_index = Dict{Symbol, Int}(sym => idx for (idx, sym) in enumerate(free_symbols))
+    symbol_to_index = Dict{Symbol, Int}(sym => idx
+                                        for (idx, sym) in enumerate(free_symbols))
 
-    return (
-            S = S,
+    return (S = S,
             V = V,
             free_symbols = free_symbols,
             symbol_to_index = symbol_to_index,
             s_diag_symbols = s_diag_symbols,
             v_diag_symbols = v_diag_symbols,
             v_offdiag_symbols = v_offdiag_symbols,
-            v_offdiag_pairs = sbp4_v_offdiag_pairs(Nint),
-           )
+            v_offdiag_pairs = sbp4_v_offdiag_pairs(Nint))
 end
 
 function _sbp4_extract_diagonal(S::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integer}
@@ -220,10 +220,12 @@ end
 
 @inline _sbp4_as_big_rational(x::Rational{BigInt}) = x
 @inline _sbp4_as_big_rational(x::Integer) = big(x) // 1
-@inline _sbp4_as_big_rational(x::Rational{<:Integer}) = big(numerator(x)) // big(denominator(x))
+@inline _sbp4_as_big_rational(x::Rational{<:Integer}) = big(numerator(x)) //
+                                                        big(denominator(x))
 
 function _sbp4_as_big_rational(x::AbstractFloat)
-    isfinite(x) || throw(ArgumentError("Cannot convert non-finite floating-point value `$x` to Rational{BigInt}."))
+    isfinite(x) ||
+        throw(ArgumentError("Cannot convert non-finite floating-point value `$x` to Rational{BigInt}."))
     return rationalize(BigInt, x)
 end
 
@@ -243,7 +245,8 @@ function _sbp4_maxabs(values)
     return m
 end
 
-function _sbp4_is_symmetric(A::SparseMatrixCSC{T, Ti}; tol::Float64 = 1e-12) where {T <: Real, Ti <: Integer}
+function _sbp4_is_symmetric(A::SparseMatrixCSC{T, Ti};
+                            tol::Float64 = 1.0e-12) where {T <: Real, Ti <: Integer}
     if T <: AbstractFloat
         return norm(Matrix(A - transpose(A)), Inf) <= tol
     end
@@ -264,7 +267,7 @@ end
 """
     sbp4_scalar_mass_gradient(source; accuracy_order=4, points=21, h=1,
                               N=points-1, R=h*(points-1), p=2, mode=SafeMode(),
-                              build_matrix=:probe, atol=nothing)
+                              atol=nothing)
 
 Build folded half-grid gradient and diagonal scalar mass in exact rational arithmetic.
 """
@@ -276,7 +279,6 @@ function sbp4_scalar_mass_gradient(source;
                                    R = h * (points - 1),
                                    p::Int = 2,
                                    mode = SafeMode(),
-                                   build_matrix::Symbol = :probe,
                                    atol = nothing)
     p >= 0 || throw(ArgumentError("`p` must satisfy p >= 0."))
     Nint = Int(N)
@@ -285,14 +287,11 @@ function sbp4_scalar_mass_gradient(source;
     points > 1 || throw(ArgumentError("`points` must be > 1."))
 
     Rq = _sbp4_as_big_rational(R)
-    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(
-                                                           source;
-                                                           accuracy_order = accuracy_order,
-                                                           N = Nint,
-                                                           R = Rq,
-                                                           mode = mode,
-                                                           build_matrix = build_matrix
-                                                          )
+    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(source;
+                                                          accuracy_order = accuracy_order,
+                                                          N = Nint,
+                                                          R = Rq,
+                                                          mode = mode)
 
     T = eltype(xfull)
     atol_use = _resolve_atol(T, atol)
@@ -307,8 +306,7 @@ function sbp4_scalar_mass_gradient(source;
     S = sparse(Hcart_half * metric)
     Sdiag = _sbp4_extract_diagonal(S)
 
-    return (
-            r = r,
+    return (r = r,
             Geven = Geven,
             Godd = Godd,
             S = S,
@@ -325,9 +323,7 @@ function sbp4_scalar_mass_gradient(source;
             accuracy_order = accuracy_order,
             R = Rq,
             mode = mode,
-            atol = atol_use,
-            build_matrix = build_matrix
-           )
+            atol = atol_use)
 end
 
 """
@@ -356,7 +352,8 @@ function sbp4_construct_divergence(S::SparseMatrixCSC{T, Ti},
     @inbounds for k in eachindex(RV)
         i = I[k]
         si = Sdiag[i]
-        si == zero(T) && throw(ArgumentError("Encountered zero scalar mass entry S[$i,$i] while forming D = S^{-1}(B-G^T V)."))
+        si == zero(T) &&
+            throw(ArgumentError("Encountered zero scalar mass entry S[$i,$i] while forming D = S^{-1}(B-G^T V)."))
         DV[k] = RV[k] / si
     end
 
@@ -370,7 +367,8 @@ function _sbp4_constraint_rows(N::Int)
     return (rows_r = rows_r, rows_r3 = rows_r3)
 end
 
-function _sbp4_constraint_error(D::SparseMatrixCSC, r::AbstractVector, p::Int, degree::Int, rows::Vector{Int})
+function _sbp4_constraint_error(D::SparseMatrixCSC, r::AbstractVector, p::Int, degree::Int,
+                                rows::Vector{Int})
     isempty(rows) && return 0.0
     u = r .^ degree
     exact = (p + degree) .* (r .^ (degree - 1))
@@ -404,7 +402,8 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
     N = length(r)
     size(Geven) == (N, N) || throw(DimensionMismatch("`Geven` must be $(N)x$(N)."))
 
-    exact_solve || throw(ArgumentError("Only exact rational solve is supported; set `exact_solve=true`."))
+    exact_solve ||
+        throw(ArgumentError("Only exact rational solve is supported; set `exact_solve=true`."))
 
     rows = _sbp4_constraint_rows(N)
 
@@ -539,7 +538,8 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
     push_eq!(row_q0, rhs_q0, :quadrature, 0, 0)
 
     m = length(A_rows)
-    A = m == 0 ? zeros(Tq, 0, n_unknowns) : reduce(vcat, (reshape(row, 1, :) for row in A_rows))
+    A = m == 0 ? zeros(Tq, 0, n_unknowns) :
+        reduce(vcat, (reshape(row, 1, :) for row in A_rows))
     bvec = collect(b_rows)
 
     x = _solve_exact_linear_system(A, bvec)
@@ -558,7 +558,8 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
     v45 = N >= 5 ? x[idx_v45] : 0 // 1
 
     S = spdiagm(0 => sdiag)
-    V = sbp4_vector_mass(sdiag; v2 = v2, v3 = v3, v4 = v4, v5 = v5, v23 = v23, v34 = v34, v45 = v45)
+    V = sbp4_vector_mass(sdiag; v2 = v2, v3 = v3, v4 = v4, v5 = v5, v23 = v23, v34 = v34,
+                         v45 = v45)
     div_data = sbp4_construct_divergence(S, V, Gq, rq; p = p)
     D = div_data.D
     B = div_data.B
@@ -569,7 +570,8 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
     quad0_val = sum(sdiag)
     quad0_err = Float64(abs(quad0_val - quad0_target))
     tail_fix_err = n_s_free < N ?
-                   maximum(abs.(Float64.(sdiag[(n_s_free + 1):N] .- s_fixed[(n_s_free + 1):N]))) :
+                   maximum(abs.(Float64.(sdiag[(n_s_free + 1):N] .-
+                                         s_fixed[(n_s_free + 1):N]))) :
                    0.0
 
     s_sym = _sbp4_is_symmetric(S)
@@ -579,7 +581,8 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
 
     if verbose
         println("SBP4 solve mode: exact")
-        println("  equations = ", m, ", unknowns = ", n_unknowns, ", exact residual = ", residual)
+        println("  equations = ", m, ", unknowns = ", n_unknowns, ", exact residual = ",
+                residual)
         println("  constraint max errors: D*r = ", err_r,
                 ", D*r^3(first 5 rows) = ", err_r3,
                 ", ones.S.ones = ", quad0_err,
@@ -588,8 +591,7 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
                 ", V symmetric = ", v_sym, ", V PD = ", v_pd)
     end
 
-    return (
-            mode = :exact,
+    return (mode = :exact,
             setup = setup,
             row_sets = rows,
             A = A,
@@ -601,19 +603,14 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
             V = V,
             D = D,
             B = B,
-            errors = (
-                      Dr_first_n_minus_4_rows = err_r,
+            errors = (Dr_first_n_minus_4_rows = err_r,
                       Dr3_first5_rows = err_r3,
                       ones_S_ones = quad0_err,
-                      fixed_tail = tail_fix_err
-                     ),
-            spd = (
-                   S_symmetric = s_sym,
+                      fixed_tail = tail_fix_err),
+            spd = (S_symmetric = s_sym,
                    S_positive_definite = s_pd,
                    V_symmetric = v_sym,
-                   V_positive_definite = v_pd
-                  )
-           )
+                   V_positive_definite = v_pd))
 end
 
 """
@@ -629,12 +626,10 @@ function sbp4_solve_accuracy_constraints(source;
                                          R = h * (points - 1),
                                          p::Int = 2,
                                          mode = SafeMode(),
-                                         build_matrix::Symbol = :probe,
                                          atol = nothing,
                                          exact_solve::Bool = true,
                                          verbose::Bool = true)
-    setup = sbp4_scalar_mass_gradient(
-                                      source;
+    setup = sbp4_scalar_mass_gradient(source;
                                       accuracy_order = accuracy_order,
                                       points = points,
                                       h = h,
@@ -642,14 +637,10 @@ function sbp4_solve_accuracy_constraints(source;
                                       R = R,
                                       p = p,
                                       mode = mode,
-                                      build_matrix = build_matrix,
-                                      atol = atol
-                                     )
-    return sbp4_solve_accuracy_constraints(
-                                          setup;
-                                          exact_solve = exact_solve,
-                                          verbose = verbose
-                                         )
+                                      atol = atol)
+    return sbp4_solve_accuracy_constraints(setup;
+                                           exact_solve = exact_solve,
+                                           verbose = verbose)
 end
 
 """
@@ -663,27 +654,21 @@ function sbp4_operators(source,
                         accuracy_order::Int = 4,
                         p::Int = 2,
                         mode = SafeMode(),
-                        build_matrix::Symbol = :probe,
                         atol = nothing,
                         exact_solve::Bool = true,
                         verbose::Bool = false)
-    solved = sbp4_solve_accuracy_constraints(
-                                             source;
+    solved = sbp4_solve_accuracy_constraints(source;
                                              accuracy_order = accuracy_order,
                                              points = Int(points),
                                              h = h,
                                              p = p,
                                              mode = mode,
-                                             build_matrix = build_matrix,
                                              atol = atol,
                                              exact_solve = exact_solve,
-                                             verbose = verbose
-                                            )
-    return (
-            D = solved.D,
+                                             verbose = verbose)
+    return (D = solved.D,
             G = solved.setup.Geven,
             S = solved.S,
             V = solved.V,
-            B = solved.B
-           )
+            B = solved.B)
 end

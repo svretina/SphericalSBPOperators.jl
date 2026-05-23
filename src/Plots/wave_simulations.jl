@@ -12,7 +12,7 @@ _format_ticks_fixed(values) = [@sprintf("%.6f", Float64(v)) for v in values]
 function plot_energy_history(
         t::AbstractVector,
         energies::AbstractVector;
-        title::AbstractString = L"Energy\ Conservation",
+        title::AbstractString = "Error in Energy conservation.",
         representation::Symbol = :auto,
         switch_tol::Real = 1.0e-4
     )
@@ -38,18 +38,17 @@ function plot_energy_history(
 
     return with_theme(theme_prd()) do
         fig = Figure(size = (980, 460))
-        Label(fig[0, 1], subtitle; fontsize = 13, halign = :right)
+        Label(fig[0, 1], title; fontsize = 24)
+        Label(fig[0, 1], subtitle; fontsize = 16, halign = :right)
         ax = Axis(
             fig[1, 1];
-            title = title,
             xlabel = L"t",
             ylabel = ylabel_txt,
             ytickformat = yfmt,
-            titlesize = 18,
-            xlabelsize = 16,
-            ylabelsize = 16,
-            xticklabelsize = 12,
-            yticklabelsize = 12
+            xlabelsize = 20,
+            ylabelsize = 20,
+            xticklabelsize = 16,
+            yticklabelsize = 16
         )
         rowsize!(fig.layout, 1, Relative(1))
         colsize!(fig.layout, 1, Relative(1))
@@ -150,8 +149,8 @@ function plot_field_evolution(
         fig = Figure(size = (960, 720))
         Label(fig[0, 1:2], title; fontsize = 18)
 
-        ax1 = Axis(fig[1, 1]; xlabel = L"r", ylabel = L"t", title = L"r\Pi(r,t)")
-        ax2 = Axis(fig[1, 2]; xlabel = L"r", ylabel = L"t", title = L"r\Xi(r,t)")
+        ax1 = Axis(fig[1, 1]; xlabel = L"r", ylabel = L"t", title = L"r\Pi(t,r)")
+        ax2 = Axis(fig[1, 2]; xlabel = L"r", ylabel = L"t", title = L"r\Xi(t,r)")
 
         hm1 = heatmap!(ax1, redges, tedges, rΠ; colormap = :balance)
         hm2 = heatmap!(ax2, redges, tedges, rΞ; colormap = :balance)
@@ -289,7 +288,7 @@ end
 
 function plot_bc_energy_comparison(
         sol_reflect, sol_absorb;
-        title::AbstractString = L"Boundary\ Condition\ Comparison",
+        title::AbstractString = "Error in Energy conservation.",
         representation::Symbol = :auto,
         switch_tol::Real = 1.0e-4
     )
@@ -317,18 +316,17 @@ function plot_bc_energy_comparison(
 
     return with_theme(theme_prd()) do
         fig = Figure(size = (980, 460))
-        Label(fig[0, 1], subtitle; fontsize = 13, halign = :right)
+        Label(fig[0, 1], title; fontsize = 24)
+        Label(fig[0, 1], subtitle; fontsize = 16, halign = :right)
         ax = Axis(
             fig[1, 1];
-            title = title,
             xlabel = L"t",
             ylabel = ylabel_txt,
             ytickformat = yfmt,
-            titlesize = 18,
-            xlabelsize = 16,
-            ylabelsize = 16,
-            xticklabelsize = 12,
-            yticklabelsize = 12
+            xlabelsize = 20,
+            ylabelsize = 20,
+            xticklabelsize = 16,
+            yticklabelsize = 16
         )
         rowsize!(fig.layout, 1, Relative(1))
         colsize!(fig.layout, 1, Relative(1))
@@ -344,7 +342,8 @@ function plot_bc_energy_comparison(
             ax, [yref]; color = RGBAf(0.0, 0.0, 0.0, 0.75),
             linestyle = :dash, linewidth = 1.0
         )
-        axislegend(ax; position = :cb, orientation = :horizontal, framevisible = false)
+        axislegend(ax; position = :cb, orientation = :horizontal, framevisible = false,
+                   labelsize = 16)
         return fig
     end
 end

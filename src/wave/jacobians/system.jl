@@ -1,7 +1,7 @@
 """
     wave_system_jac!(J, U, p, t)
 
-Analytic Jacobian for `wave_system_ode_vec!` in stacked layout `[Π; Ξ]`.
+Analytic Jacobian for `wave_system_ode_vec!` in stacked layout `[Π; Ψ]`.
 """
 function wave_system_jac!(
         J::AbstractMatrix,
@@ -45,7 +45,7 @@ end
 """
     wave_system_jac_prototype(ops; boundary_condition=:absorbing)
 
-Sparse Jacobian nonzero pattern for `wave_system_jac!` in stacked layout `[Π; Ξ]`.
+Sparse Jacobian nonzero pattern for `wave_system_jac!` in stacked layout `[Π; Ψ]`.
 """
 function wave_system_jac_prototype(
         ops::WaveOperators;

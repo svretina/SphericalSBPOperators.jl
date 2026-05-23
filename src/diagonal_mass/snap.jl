@@ -1,5 +1,5 @@
 @inline function _default_atol(::Type{T}) where {T <: AbstractFloat}
-    return T(1e-12)
+    return T(1.0e-12)
 end
 
 @inline function _default_atol(::Type{T}) where {T <: Real}
@@ -41,7 +41,8 @@ For `AbstractFloat` matrices:
 
 For non-floating types (e.g. rationals), only `dropzeros!` is applied.
 """
-function snap_sparse!(A::SparseMatrixCSC{T, Ti}; snap_factor::Float64 = 64.0) where {T <: Real, Ti <: Integer}
+function snap_sparse!(A::SparseMatrixCSC{T, Ti};
+                      snap_factor::Float64 = 64.0) where {T <: Real, Ti <: Integer}
     if T <: AbstractFloat
         scale = _maxabs(A.nzval)
         threshold = T(snap_factor) * eps(T) * max(scale, one(T))
@@ -54,4 +55,3 @@ function snap_sparse!(A::SparseMatrixCSC{T, Ti}; snap_factor::Float64 = 64.0) wh
     dropzeros!(A)
     return A
 end
-

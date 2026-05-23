@@ -1,36 +1,9 @@
-function _probe_derivative_matrix(Dfull, M::Int)
-    T = eltype(Dfull)
-    Gdense = Matrix{T}(undef, M, M)
-    e = fill(zero(T), M)
-    for j in 1:M
-        e[j] = one(T)
-        Gdense[:, j] = Dfull * e
-        e[j] = zero(T)
-    end
-    return sparse(Gdense)
-end
-
-function _derivative_matrix(Dfull, M::Int, build_matrix::Symbol)
-    build_matrix in (:probe, :matrix_if_square) ||
-        throw(ArgumentError("`build_matrix` must be `:probe` or `:matrix_if_square`."))
-
-    if build_matrix == :matrix_if_square && applicable(Matrix, Dfull)
-        maybe_dense = Matrix(Dfull)
-        if size(maybe_dense) == (M, M)
-            return sparse(maybe_dense)
-        end
-    end
-
-    return _probe_derivative_matrix(Dfull, M)
-end
-
 function _build_full_grid_objects(
         source;
         accuracy_order::Int,
         N::Int,
         R,
-        mode,
-        build_matrix::Symbol
+        mode
     )
     N > 0 || throw(ArgumentError("`N` must be positive."))
     accuracy_order > 0 || throw(ArgumentError("`accuracy_order` must be positive."))
@@ -49,7 +22,9 @@ function _build_full_grid_objects(
 
     xfull = collect(grid(Dfull))
     M = length(xfull)
-    Gfull = _derivative_matrix(Dfull, M, build_matrix)
+    Gfull = sparse(Matrix(Dfull))
+    size(Gfull) == (M, M) ||
+        throw(DimensionMismatch("Extracted derivative matrix has size $(size(Gfull)); expected ($M, $M)."))
     Hfull = sparse(mass_matrix(Dfull))
     snap_sparse!(Gfull)
     snap_sparse!(Hfull)

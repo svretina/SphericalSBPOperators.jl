@@ -13,8 +13,8 @@ SBP8 split vector-mass boundary block.
 - `boundary_bandwidth` must be odd (e.g. 5 for pentadiagonal, 7 for heptadiagonal).
 """
 function sbp8_v_offdiag_pairs(N::Integer;
-    boundary_rows::Integer=16,
-    boundary_bandwidth::Integer=7)
+                              boundary_rows::Integer = 16,
+                              boundary_bandwidth::Integer = 7)
     Nint = Int(N)
     Nint >= 1 || throw(ArgumentError("`N` must be positive."))
 
@@ -26,7 +26,7 @@ function sbp8_v_offdiag_pairs(N::Integer;
     nb = min(Int(boundary_rows), Nint)
     nb >= 1 || throw(ArgumentError("`boundary_rows` must be >= 1."))
 
-    pairs = Tuple{Int,Int}[]
+    pairs = Tuple{Int, Int}[]
     @inbounds for i in 1:nb
         jmax = min(nb, i + half_band)
         for j in (i + 1):jmax
@@ -48,11 +48,12 @@ Structure:
   leading `boundary_rows x boundary_rows` block.
 - For `i > boundary_rows`, `V[i,i] = s_i`.
 """
-function sbp8_vector_mass(; N::Integer=20,
-    boundary_rows::Integer=16,
-    boundary_bandwidth::Integer=7,
-    v_symbol_prefix::AbstractString="v",
-    s_symbol_prefix::AbstractString="s")
+function sbp8_vector_mass(;
+                          N::Integer = 20,
+                          boundary_rows::Integer = 16,
+                          boundary_bandwidth::Integer = 7,
+                          v_symbol_prefix::AbstractString = "v",
+                          s_symbol_prefix::AbstractString = "s")
     Nint = Int(N)
     Nint >= 1 || throw(ArgumentError("`N` must be positive."))
 
@@ -78,11 +79,9 @@ function sbp8_vector_mass(; N::Integer=20,
         push!(v_diag_symbols, sym)
     end
 
-    v_offdiag_pairs = sbp8_v_offdiag_pairs(
-        Nint;
-        boundary_rows=nb,
-        boundary_bandwidth=boundary_bandwidth
-    )
+    v_offdiag_pairs = sbp8_v_offdiag_pairs(Nint;
+                                           boundary_rows = nb,
+                                           boundary_bandwidth = boundary_bandwidth)
     v_offdiag_symbols = Symbol[]
     @inbounds for (i, j) in v_offdiag_pairs
         sym = Symbol(v_symbol_prefix, "_", i, "_", j)
@@ -101,24 +100,23 @@ function sbp8_vector_mass(; N::Integer=20,
     end
 
     free_symbols = vcat(s_diag_symbols, v_diag_symbols, v_offdiag_symbols)
-    symbol_to_index = Dict{Symbol,Int}(sym => idx for (idx, sym) in enumerate(free_symbols))
+    symbol_to_index = Dict{Symbol, Int}(sym => idx
+                                        for (idx, sym) in enumerate(free_symbols))
 
-    return (
-        S=S,
-        V=V,
-        free_symbols=free_symbols,
-        symbol_to_index=symbol_to_index,
-        s_diag_symbols=s_diag_symbols,
-        v_diag_symbols=v_diag_symbols,
-        v_offdiag_symbols=v_offdiag_symbols,
-        v_offdiag_pairs=v_offdiag_pairs,
-        s_tail_symbols=s_tail_symbols,
-        boundary_rows=nb,
-        boundary_bandwidth=Int(boundary_bandwidth)
-    )
+    return (S = S,
+            V = V,
+            free_symbols = free_symbols,
+            symbol_to_index = symbol_to_index,
+            s_diag_symbols = s_diag_symbols,
+            v_diag_symbols = v_diag_symbols,
+            v_offdiag_symbols = v_offdiag_symbols,
+            v_offdiag_pairs = v_offdiag_pairs,
+            s_tail_symbols = s_tail_symbols,
+            boundary_rows = nb,
+            boundary_bandwidth = Int(boundary_bandwidth))
 end
 
-function _sbp8_extract_diagonal(S::SparseMatrixCSC{T,Ti}) where {T<:Real,Ti<:Integer}
+function _sbp8_extract_diagonal(S::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integer}
     n, m = size(S)
     n == m || throw(DimensionMismatch("`S` must be square."))
 
@@ -163,10 +161,11 @@ Construct numeric SBP8 vector-mass matrix `V` from scalar diagonal entries `s_di
 - Off-diagonals are only on `sbp8_v_offdiag_pairs(...)`, ordered exactly as in that function.
 """
 function sbp8_vector_mass(s_diag::AbstractVector{T};
-    boundary_rows::Integer=16,
-    boundary_bandwidth::Integer=7,
-    v_boundary_diag::Union{Nothing,AbstractVector}=nothing,
-    v_boundary_offdiag::Union{Nothing,AbstractVector}=nothing) where {T<:Real}
+                          boundary_rows::Integer = 16,
+                          boundary_bandwidth::Integer = 7,
+                          v_boundary_diag::Union{Nothing, AbstractVector} = nothing,
+                          v_boundary_offdiag::Union{Nothing, AbstractVector} = nothing) where {T <:
+                                                                                               Real}
     N = length(s_diag)
     N >= 1 || throw(ArgumentError("`s_diag` must be non-empty."))
 
@@ -190,11 +189,9 @@ function sbp8_vector_mass(s_diag::AbstractVector{T};
         end
     end
 
-    pairs = sbp8_v_offdiag_pairs(
-        N;
-        boundary_rows=nb,
-        boundary_bandwidth=boundary_bandwidth
-    )
+    pairs = sbp8_v_offdiag_pairs(N;
+                                 boundary_rows = nb,
+                                 boundary_bandwidth = boundary_bandwidth)
 
     offvals = if isnothing(v_boundary_offdiag)
         fill(zero(T), length(pairs))
@@ -222,40 +219,42 @@ end
 Convenience overload that extracts `s_diag` from diagonal scalar mass `S` and
 delegates to `sbp8_vector_mass(s_diag; kwargs...)`.
 """
-function sbp8_vector_mass(S::SparseMatrixCSC{T,Ti};
-    boundary_rows::Integer=16,
-    boundary_bandwidth::Integer=7,
-    v_boundary_diag::Union{Nothing,AbstractVector}=nothing,
-    v_boundary_offdiag::Union{Nothing,AbstractVector}=nothing) where {T<:Real,Ti<:Integer}
+function sbp8_vector_mass(S::SparseMatrixCSC{T, Ti};
+                          boundary_rows::Integer = 16,
+                          boundary_bandwidth::Integer = 7,
+                          v_boundary_diag::Union{Nothing, AbstractVector} = nothing,
+                          v_boundary_offdiag::Union{Nothing, AbstractVector} = nothing) where {
+                                                                                               T <:
+                                                                                               Real,
+                                                                                               Ti <:
+                                                                                               Integer
+                                                                                               }
     sdiag = _sbp8_extract_diagonal(S)
-    return sbp8_vector_mass(
-        sdiag;
-        boundary_rows=boundary_rows,
-        boundary_bandwidth=boundary_bandwidth,
-        v_boundary_diag=v_boundary_diag,
-        v_boundary_offdiag=v_boundary_offdiag
-    )
+    return sbp8_vector_mass(sdiag;
+                            boundary_rows = boundary_rows,
+                            boundary_bandwidth = boundary_bandwidth,
+                            v_boundary_diag = v_boundary_diag,
+                            v_boundary_offdiag = v_boundary_offdiag)
 end
 
 """
     sbp8_scalar_mass_gradient(source; accuracy_order=8, points=21, h=1,
                               N=points-1, R=h*(points-1), p=2, mode=SafeMode(),
-                              build_matrix=:probe, atol=nothing)
+                              atol=nothing)
 
 Construct folded half-grid gradient/mass setup for SBP8.
 
 Returns a `NamedTuple` with at least `r`, `Geven`, `Godd`, `S`, `Sdiag`, `Hcart_half`.
 """
 function sbp8_scalar_mass_gradient(source;
-    accuracy_order::Int=8,
-    points::Int=21,
-    h::Real=1,
-    N=points - 1,
-    R=h * (points - 1),
-    p::Int=2,
-    mode=SafeMode(),
-    build_matrix::Symbol=:probe,
-    atol=nothing)
+                                   accuracy_order::Int = 8,
+                                   points::Int = 21,
+                                   h::Real = 1,
+                                   N = points - 1,
+                                   R = h * (points - 1),
+                                   p::Int = 2,
+                                   mode = SafeMode(),
+                                   atol = nothing)
     p >= 0 || throw(ArgumentError("`p` must satisfy p >= 0."))
     Nint = Int(N)
     Nint > 0 || throw(ArgumentError("`N` must be positive."))
@@ -263,18 +262,15 @@ function sbp8_scalar_mass_gradient(source;
     points > 1 || throw(ArgumentError("`points` must be > 1."))
 
     Rq = _sbp8_as_big_rational(R)
-    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(
-        source;
-        accuracy_order=accuracy_order,
-        N=Nint,
-        R=Rq,
-        mode=mode,
-        build_matrix=build_matrix
-    )
+    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(source;
+                                                          accuracy_order = accuracy_order,
+                                                          N = Nint,
+                                                          R = Rq,
+                                                          mode = mode)
 
     T = eltype(xfull)
     atol_use = _resolve_atol(T, atol)
-    r, Rop, Eeven, Eodd = _build_folding_operators(xfull; atol=atol_use)
+    r, Rop, Eeven, Eodd = _build_folding_operators(xfull; atol = atol_use)
 
     Geven = sparse(Rop * Gfull * Eeven)
     Godd = sparse(Rop * Gfull * Eodd)
@@ -285,35 +281,34 @@ function sbp8_scalar_mass_gradient(source;
     S = sparse(Hcart_half * metric)
     Sdiag = _sbp8_extract_diagonal(S)
 
-    return (
-        r=r,
-        Geven=Geven,
-        Godd=Godd,
-        S=S,
-        Sdiag=Sdiag,
-        Dfull=Dfull,
-        xfull=xfull,
-        Gfull=Gfull,
-        Hfull=Hfull,
-        Hcart_half=Hcart_half,
-        Rop=Rop,
-        Eeven=Eeven,
-        Eodd=Eodd,
-        p=p,
-        accuracy_order=accuracy_order,
-        R=Rq,
-        mode=mode,
-        atol=atol_use,
-        build_matrix=build_matrix
-    )
+    return (r = r,
+            Geven = Geven,
+            Godd = Godd,
+            S = S,
+            Sdiag = Sdiag,
+            Dfull = Dfull,
+            xfull = xfull,
+            Gfull = Gfull,
+            Hfull = Hfull,
+            Hcart_half = Hcart_half,
+            Rop = Rop,
+            Eeven = Eeven,
+            Eodd = Eodd,
+            p = p,
+            accuracy_order = accuracy_order,
+            R = Rq,
+            mode = mode,
+            atol = atol_use)
 end
 
 @inline _sbp8_as_big_rational(x::Rational{BigInt}) = x
 @inline _sbp8_as_big_rational(x::Integer) = big(x) // 1
-@inline _sbp8_as_big_rational(x::Rational{<:Integer}) = big(numerator(x)) // big(denominator(x))
+@inline _sbp8_as_big_rational(x::Rational{<:Integer}) = big(numerator(x)) //
+                                                        big(denominator(x))
 
 function _sbp8_as_big_rational(x::AbstractFloat)
-    isfinite(x) || throw(ArgumentError("Cannot convert non-finite floating-point value `$x` to Rational{BigInt}."))
+    isfinite(x) ||
+        throw(ArgumentError("Cannot convert non-finite floating-point value `$x` to Rational{BigInt}."))
     return rationalize(BigInt, x)
 end
 
@@ -321,7 +316,8 @@ function _sbp8_as_big_rational(x::Real)
     throw(ArgumentError("Could not convert value of type $(typeof(x)) to Rational{BigInt}."))
 end
 
-function _sbp8_sparse_convert(A::SparseMatrixCSC{Ta,Ti}, ::Type{Tb}) where {Ta<:Real,Ti<:Integer,Tb<:Real}
+function _sbp8_sparse_convert(A::SparseMatrixCSC{Ta, Ti},
+                              ::Type{Tb}) where {Ta <: Real, Ti <: Integer, Tb <: Real}
     n, m = size(A)
     I, J, V = findnz(A)
     W = Vector{Tb}(undef, length(V))
@@ -343,18 +339,19 @@ function _sbp8_maxabs(values)
     return m
 end
 
-function _sbp8_is_symmetric(A::SparseMatrixCSC{T,Ti}; tol::Float64=1e-12) where {T<:Real,Ti<:Integer}
+function _sbp8_is_symmetric(A::SparseMatrixCSC{T, Ti};
+                            tol::Float64 = 1.0e-12) where {T <: Real, Ti <: Integer}
     if T <: AbstractFloat
         return norm(Matrix(A - transpose(A)), Inf) <= tol
     end
     return Matrix(A) == transpose(Matrix(A))
 end
 
-function _sbp8_is_pd(A::SparseMatrixCSC{T,Ti}) where {T<:Real,Ti<:Integer}
+function _sbp8_is_pd(A::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integer}
     n, m = size(A)
     n == m || return false
     try
-        LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Matrix{Float64}(A)); check=true)
+        LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Matrix{Float64}(A)); check = true)
         return true
     catch
         return false
@@ -370,11 +367,11 @@ Construct divergence operator via
 
 where `B[end,end] = r[end]^p`.
 """
-function sbp8_construct_divergence(S::SparseMatrixCSC{T,Ti},
-    V::SparseMatrixCSC{T,Ti},
-    Geven::SparseMatrixCSC{T,Ti},
-    r::AbstractVector;
-    p::Int=2) where {T<:Real,Ti<:Integer}
+function sbp8_construct_divergence(S::SparseMatrixCSC{T, Ti},
+                                   V::SparseMatrixCSC{T, Ti},
+                                   Geven::SparseMatrixCSC{T, Ti},
+                                   r::AbstractVector;
+                                   p::Int = 2) where {T <: Real, Ti <: Integer}
     p >= 0 || throw(ArgumentError("`p` must satisfy p >= 0."))
     N = length(r)
     size(S) == (N, N) || throw(DimensionMismatch("`S` must be $(N)x$(N)."))
@@ -391,12 +388,13 @@ function sbp8_construct_divergence(S::SparseMatrixCSC{T,Ti},
     @inbounds for k in eachindex(RV)
         i = I[k]
         si = Sdiag[i]
-        si == zero(T) && throw(ArgumentError("Encountered zero scalar mass entry S[$i,$i] while forming D = S^{-1}(B-G^T V)."))
+        si == zero(T) &&
+            throw(ArgumentError("Encountered zero scalar mass entry S[$i,$i] while forming D = S^{-1}(B-G^T V)."))
         DV[k] = RV[k] / si
     end
 
     D = sparse(I, J, DV, N, N)
-    return (D=D, B=B, RHS=RHS, Sdiag=Sdiag)
+    return (D = D, B = B, RHS = RHS, Sdiag = Sdiag)
 end
 
 function _sbp8_infer_right_boundary_closure(setup::NamedTuple, Geven::SparseMatrixCSC)
@@ -412,7 +410,8 @@ function _sbp8_infer_right_boundary_closure(setup::NamedTuple, Geven::SparseMatr
     pattern = _closure_diagnostics(Geven).closure_width_right
     push!(candidates, Int(pattern))
 
-    isempty(candidates) && throw(ArgumentError("Could not infer right-boundary closure width."))
+    isempty(candidates) &&
+        throw(ArgumentError("Could not infer right-boundary closure width."))
     return max(0, maximum(candidates))
 end
 
@@ -423,17 +422,16 @@ function _sbp8_constraint_rows(N::Int, closure_right::Int, first_rows_r7::Int)
     rows_r3 = rows_poly_end == 0 ? Int[] : collect(1:rows_poly_end)
     rows_r5 = rows_poly_end == 0 ? Int[] : collect(1:rows_poly_end)
     rows_r7 = collect(1:min(max(0, first_rows_r7), N))
-    return (
-        rows_r=rows_r,
-        rows_r3=rows_r3,
-        rows_r5=rows_r5,
-        rows_r7=rows_r7,
-        closure_right=closure_clamped
-    )
+    return (rows_r = rows_r,
+            rows_r3 = rows_r3,
+            rows_r5 = rows_r5,
+            rows_r7 = rows_r7,
+            closure_right = closure_clamped)
 end
 
-function _sbp8_constraint_error_metrics(D::SparseMatrixCSC, r::AbstractVector, p::Int, degree::Int, rows::Vector{Int})
-    isempty(rows) && return (abs=0.0, rel=0.0)
+function _sbp8_constraint_error_metrics(D::SparseMatrixCSC, r::AbstractVector, p::Int,
+                                        degree::Int, rows::Vector{Int})
+    isempty(rows) && return (abs = 0.0, rel = 0.0)
     u = r .^ degree
     exact = (p + degree) .* (r .^ (degree - 1))
     num = D * u
@@ -441,17 +439,17 @@ function _sbp8_constraint_error_metrics(D::SparseMatrixCSC, r::AbstractVector, p
     absmax = maximum(abs.(err))
     scale = max(1.0, maximum(abs.(Float64.(exact[rows]))))
     relmax = absmax / scale
-    return (abs=absmax, rel=relmax)
+    return (abs = absmax, rel = relmax)
 end
 
 function _sbp8_build_linear_constraint_system(r::Vector{Float64},
-    G::Matrix{Float64},
-    s_target::Vector{Float64},
-    p::Int,
-    rows,
-    nb::Int,
-    pairs::Vector{Tuple{Int,Int}},
-    quad_target::Float64)
+                                              G::Matrix{Float64},
+                                              s_target::Vector{Float64},
+                                              p::Int,
+                                              rows,
+                                              nb::Int,
+                                              pairs::Vector{Tuple{Int, Int}},
+                                              quad_target::Float64)
     N = length(r)
     npairs = length(pairs)
     nvar = 2 * nb + npairs
@@ -533,16 +531,16 @@ function _sbp8_build_linear_constraint_system(r::Vector{Float64},
     @inbounds for i in 1:m
         A[i, :] .= Arows[i]
     end
-    return (A=A, b=bvec)
+    return (A = A, b = bvec)
 end
 
 function _sbp8_polish_linear_constraints(x0::Vector{Float64},
-    A::Matrix{Float64},
-    b::Vector{Float64})
-    isempty(b) && return (x=x0, residual=0.0, changed=false, success=true)
+                                         A::Matrix{Float64},
+                                         b::Vector{Float64})
+    isempty(b) && return (x = x0, residual = 0.0, changed = false, success = true)
     r = A * x0 .- b
     inf0 = maximum(abs.(r))
-    inf0 == 0.0 && return (x=x0, residual=0.0, changed=false, success=true)
+    inf0 == 0.0 && return (x = x0, residual = 0.0, changed = false, success = true)
 
     x = copy(x0)
     best_x = copy(x0)
@@ -551,7 +549,7 @@ function _sbp8_polish_linear_constraints(x0::Vector{Float64},
     # Rectangular QR solve gives a stable minimum-norm correction for A*δ = r.
     for _ in 1:3
         rcur = A * x .- b
-        if maximum(abs.(rcur)) <= max(1e-15, eps(Float64))
+        if maximum(abs.(rcur)) <= max(1.0e-15, eps(Float64))
             break
         end
         delta = try
@@ -569,22 +567,24 @@ function _sbp8_polish_linear_constraints(x0::Vector{Float64},
         end
     end
 
-    return (x=best_x, residual=best_res, changed=true, success=best_res <= inf0 + 1e-14)
+    return (x = best_x, residual = best_res, changed = true,
+            success = best_res <= inf0 + 1.0e-14)
 end
 
 function _sbp8_exact_default_s1_target(rq::Vector{Rational{BigInt}};
-    factor::Rational{BigInt}=11 // 20)
-    length(rq) >= 2 || throw(ArgumentError("Need at least two grid points to infer spacing for default S[1,1] target."))
+                                       factor::Rational{BigInt} = 11 // 20)
+    length(rq) >= 2 ||
+        throw(ArgumentError("Need at least two grid points to infer spacing for default S[1,1] target."))
     h = rq[2] - rq[1]
     h > 0 // 1 || throw(ArgumentError("Grid spacing must be positive."))
     return factor * h^3
 end
 
 function _sbp8_build_exact_constraint_system(setup::NamedTuple,
-    rows;
-    diag_free_indices::Vector{Int},
-    v_offdiag_pairs::Vector{Tuple{Int,Int}},
-    s1_target::Union{Nothing,Rational{BigInt}}=nothing)
+                                             rows;
+                                             diag_free_indices::Vector{Int},
+                                             v_offdiag_pairs::Vector{Tuple{Int, Int}},
+                                             s1_target::Union{Nothing, Rational{BigInt}} = nothing)
     hasproperty(setup, :r) || throw(ArgumentError("`setup` must include `r`."))
     hasproperty(setup, :Geven) || throw(ArgumentError("`setup` must include `Geven`."))
     hasproperty(setup, :p) || throw(ArgumentError("`setup` must include `p`."))
@@ -605,7 +605,7 @@ function _sbp8_build_exact_constraint_system(setup::NamedTuple,
     n_unknowns = n_s + n_vdiag + n_voff
 
     idx_s(i) = i
-    vdiag_to_col = Dict{Int,Int}(i => (n_s + k) for (k, i) in enumerate(diag_free_indices))
+    vdiag_to_col = Dict{Int, Int}(i => (n_s + k) for (k, i) in enumerate(diag_free_indices))
     idx_voff(k) = n_s + n_vdiag + k
 
     A_rows = Vector{Vector{Tq}}()
@@ -615,7 +615,7 @@ function _sbp8_build_exact_constraint_system(setup::NamedTuple,
     function push_eq!(row, rhs, family::Symbol, degree::Int, row_index::Int)
         push!(A_rows, row)
         push!(b_rows, rhs)
-        push!(tags, (family=family, degree=degree, row=row_index))
+        push!(tags, (family = family, degree = degree, row = row_index))
         return nothing
     end
 
@@ -678,49 +678,47 @@ function _sbp8_build_exact_constraint_system(setup::NamedTuple,
     end
 
     m = length(A_rows)
-    A = m == 0 ? zeros(Tq, 0, n_unknowns) : reduce(vcat, (reshape(row, 1, :) for row in A_rows))
+    A = m == 0 ? zeros(Tq, 0, n_unknowns) :
+        reduce(vcat, (reshape(row, 1, :) for row in A_rows))
     b = collect(b_rows)
-    return (
-        A=A,
-        b=b,
-        tags=tags,
-        r=rq,
-        G=Gq,
-        N=N,
-        p=p,
-        diag_free_indices=diag_free_indices,
-        v_offdiag_pairs=v_offdiag_pairs,
-        indexing=(
-            n_s=n_s,
-            n_vdiag=n_vdiag,
-            n_voff=n_voff,
-            idx_s=idx_s,
-            vdiag_to_col=vdiag_to_col,
-            idx_voff=idx_voff
-        )
-    )
+    return (A = A,
+            b = b,
+            tags = tags,
+            r = rq,
+            G = Gq,
+            N = N,
+            p = p,
+            diag_free_indices = diag_free_indices,
+            v_offdiag_pairs = v_offdiag_pairs,
+            indexing = (n_s = n_s,
+                        n_vdiag = n_vdiag,
+                        n_voff = n_voff,
+                        idx_s = idx_s,
+                        vdiag_to_col = vdiag_to_col,
+                        idx_voff = idx_voff))
 end
 
 function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
-    boundary_rows::Union{Nothing,Int}=nothing,
-    boundary_bandwidth::Int=7,
-    boundary_closure::Union{Nothing,Int}=nothing,
-    first_rows_r7::Int=6,
-    v_diag_free_end::Union{Nothing,Int}=nothing,
-    s1_target::Union{Nothing,Real}=nothing,
-    s1_target_factor::Float64=0.55,
-    s_min::Float64=1e-12,
-    enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=5e4,
-    enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=5e-6,
-    spectrum_nonpositive_tol::Float64=1e-8,
-    stability_check::Bool=true,
-    verbose::Bool=true)
+                                                boundary_rows::Union{Nothing, Int} = nothing,
+                                                boundary_bandwidth::Int = 7,
+                                                boundary_closure::Union{Nothing, Int} = nothing,
+                                                first_rows_r7::Int = 6,
+                                                v_diag_free_end::Union{Nothing, Int} = nothing,
+                                                s1_target::Union{Nothing, Real} = nothing,
+                                                s1_target_factor::Float64 = 0.55,
+                                                s_min::Float64 = 1.0e-12,
+                                                enforce_fp_accuracy::Bool = true,
+                                                floating_point_factor::Float64 = 5.0e4,
+                                                enforce_real_negative_spectrum::Bool = true,
+                                                spectrum_imag_tol::Float64 = 5.0e-6,
+                                                spectrum_nonpositive_tol::Float64 = 1.0e-8,
+                                                stability_check::Bool = true,
+                                                verbose::Bool = true)
     hasproperty(setup, :r) || throw(ArgumentError("`setup` must include `r`."))
     hasproperty(setup, :Geven) || throw(ArgumentError("`setup` must include `Geven`."))
     hasproperty(setup, :p) || throw(ArgumentError("`setup` must include `p`."))
-    s_min > 0 || throw(ArgumentError("`s_min` must be strictly positive to keep S invertible."))
+    s_min > 0 ||
+        throw(ArgumentError("`s_min` must be strictly positive to keep S invertible."))
 
     Geven = sparse(setup.Geven)
     closure_auto = _sbp8_infer_right_boundary_closure(setup, Geven)
@@ -731,30 +729,27 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
 
     pair_rows_auto = min(N, 2 * closure_right)
     pair_rows = isnothing(boundary_rows) ? pair_rows_auto : clamp(Int(boundary_rows), 1, N)
-    v_diag_end = isnothing(v_diag_free_end) ? min(N, max(pair_rows + 4, 20)) : clamp(Int(v_diag_free_end), 1, N)
+    v_diag_end = isnothing(v_diag_free_end) ? min(N, max(pair_rows + 4, 20)) :
+                 clamp(Int(v_diag_free_end), 1, N)
     diag_free_indices = collect(1:v_diag_end)
 
-    pairs = sbp8_v_offdiag_pairs(
-        N;
-        boundary_rows=pair_rows,
-        boundary_bandwidth=boundary_bandwidth
-    )
+    pairs = sbp8_v_offdiag_pairs(N;
+                                 boundary_rows = pair_rows,
+                                 boundary_bandwidth = boundary_bandwidth)
 
     rq = Rational{BigInt}[_sbp8_as_big_rational(ri) for ri in setup.r]
     s1_q = if isnothing(s1_target)
         factor_q = _sbp8_as_big_rational(s1_target_factor)
-        _sbp8_exact_default_s1_target(rq; factor=factor_q)
+        _sbp8_exact_default_s1_target(rq; factor = factor_q)
     else
         _sbp8_as_big_rational(s1_target)
     end
 
-    sys = _sbp8_build_exact_constraint_system(
-        setup,
-        rows;
-        diag_free_indices=diag_free_indices,
-        v_offdiag_pairs=pairs,
-        s1_target=s1_q
-    )
+    sys = _sbp8_build_exact_constraint_system(setup,
+                                              rows;
+                                              diag_free_indices = diag_free_indices,
+                                              v_offdiag_pairs = pairs,
+                                              s1_target = s1_q)
     A = sys.A
     b = sys.b
     x_exact = _solve_exact_linear_system(A, b)
@@ -767,11 +762,15 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
 
     sdiag_q = [x_exact[i] for i in 1:n_s]
     min_s = minimum(Float64.(sdiag_q))
-    min_s > 0 || throw(ArgumentError("Exact SBP8 solution violates strict positivity on S diagonal (min = $min_s)."))
-    min_s > s_min || throw(ArgumentError("Exact SBP8 solution violates `s_min` on S diagonal (min = $min_s, s_min = $s_min)."))
+    min_s > 0 ||
+        throw(ArgumentError("Exact SBP8 solution violates strict positivity on S diagonal (min = $min_s)."))
+    min_s > s_min ||
+        throw(ArgumentError("Exact SBP8 solution violates `s_min` on S diagonal (min = $min_s, s_min = $s_min)."))
     s1_exact = Float64(sdiag_q[1])
-    s1_exact > 0 || throw(ArgumentError("Exact SBP8 solution violates strict positivity at origin: S[1,1] = $s1_exact."))
-    s1_exact > s_min || throw(ArgumentError("Exact SBP8 solution violates invertibility at origin: S[1,1] = $s1_exact <= s_min = $s_min."))
+    s1_exact > 0 ||
+        throw(ArgumentError("Exact SBP8 solution violates strict positivity at origin: S[1,1] = $s1_exact."))
+    s1_exact > s_min ||
+        throw(ArgumentError("Exact SBP8 solution violates invertibility at origin: S[1,1] = $s1_exact <= s_min = $s_min."))
 
     vdiag_q = Vector{Rational{BigInt}}(undef, N)
     @inbounds for i in 1:N
@@ -794,7 +793,7 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
         end
     end
 
-    div_data = sbp8_construct_divergence(S, V, sys.G, sys.r; p=sys.p)
+    div_data = sbp8_construct_divergence(S, V, sys.G, sys.r; p = sys.p)
     D = div_data.D
     B = div_data.B
 
@@ -815,7 +814,7 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
 
     Vb = Matrix{Float64}(V[1:pair_rows, 1:pair_rows])
     v_boundary_pd = try
-        LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Vb); check=true)
+        LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Vb); check = true)
         true
     catch
         false
@@ -823,16 +822,16 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
     v_pd = _sbp8_is_pd(V)
 
     L = sparse(D * sys.G)
-    eigvals_L = stability_check || enforce_real_negative_spectrum ? _high_precision_schur_values(Matrix(L)) : Complex{Float64x4}[]
+    eigvals_L = stability_check || enforce_real_negative_spectrum ?
+                _high_precision_schur_values(Matrix(L)) : Complex{Float64x4}[]
     max_real_L = isempty(eigvals_L) ? NaN : maximum(Float64.(real.(eigvals_L)))
     max_abs_imag_L = isempty(eigvals_L) ? NaN : maximum(Float64.(abs.(imag.(eigvals_L))))
     spectrum_ok = isempty(eigvals_L) ? true :
-                  (max_abs_imag_L <= spectrum_imag_tol && max_real_L <= spectrum_nonpositive_tol)
+                  (max_abs_imag_L <= spectrum_imag_tol &&
+                   max_real_L <= spectrum_nonpositive_tol)
     if enforce_real_negative_spectrum && !spectrum_ok
-        throw(ArgumentError(
-            "SBP8 spectrum check failed (exact mode): max_abs_imag_eig=$(max_abs_imag_L), " *
-            "max_real_eig=$(max_real_L), thresholds=(imag<=$(spectrum_imag_tol), real<=$(spectrum_nonpositive_tol))."
-        ))
+        throw(ArgumentError("SBP8 spectrum check failed (exact mode): max_abs_imag_eig=$(max_abs_imag_L), " *
+                            "max_real_eig=$(max_real_L), thresholds=(imag<=$(spectrum_imag_tol), real<=$(spectrum_nonpositive_tol))."))
     end
 
     fp_tol = floating_point_factor * eps(Float64)
@@ -842,22 +841,19 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
             (err_r7.rel <= fp_tol) &&
             (quad_rel <= fp_tol)
     if enforce_fp_accuracy && !fp_ok
-        throw(ArgumentError(
-            "SBP8 exact constraints are not at floating-point level after conversion. " *
-            "rel-errors: Dr=$(err_r.rel), Dr3=$(err_r3.rel), Dr5=$(err_r5.rel), " *
-            "Dr7=$(err_r7.rel), quadrature=$(quad_rel); threshold=$(fp_tol)."
-        ))
+        throw(ArgumentError("SBP8 exact constraints are not at floating-point level after conversion. " *
+                            "rel-errors: Dr=$(err_r.rel), Dr3=$(err_r3.rel), Dr5=$(err_r5.rel), " *
+                            "Dr7=$(err_r7.rel), quadrature=$(quad_rel); threshold=$(fp_tol)."))
     end
 
-    interface_jump = (pair_rows < N) ? abs(Float64(vdiag_q[pair_rows] - sdiag_q[pair_rows + 1])) : 0.0
+    interface_jump = (pair_rows < N) ?
+                     abs(Float64(vdiag_q[pair_rows] - sdiag_q[pair_rows + 1])) : 0.0
 
     constructor_rows = v_diag_end
-    constructor_pairs = sbp8_v_offdiag_pairs(
-        N;
-        boundary_rows=constructor_rows,
-        boundary_bandwidth=boundary_bandwidth
-    )
-    pair_value = Dict{Tuple{Int,Int},Float64}()
+    constructor_pairs = sbp8_v_offdiag_pairs(N;
+                                             boundary_rows = constructor_rows,
+                                             boundary_bandwidth = boundary_bandwidth)
+    pair_value = Dict{Tuple{Int, Int}, Float64}()
     @inbounds for (k, pr) in enumerate(pairs)
         pair_value[pr] = Float64(voff_q[k])
     end
@@ -866,100 +862,89 @@ function _sbp8_solve_accuracy_constraints_exact(setup::NamedTuple;
 
     if verbose
         println("SBP8 solve mode: exact")
-        println("  equations = ", size(A, 1), ", unknowns = ", size(A, 2), ", exact residual = ", residual_exact)
+        println("  equations = ", size(A, 1), ", unknowns = ", size(A, 2),
+                ", exact residual = ", residual_exact)
         println("  right closure = ", rows.closure_right,
-            ", pair rows = ", pair_rows,
-            ", vdiag free end = ", v_diag_end,
-            ", boundary bandwidth = ", boundary_bandwidth,
-            ", offdiag vars = ", n_voff)
+                ", pair rows = ", pair_rows,
+                ", vdiag free end = ", v_diag_end,
+                ", boundary bandwidth = ", boundary_bandwidth,
+                ", offdiag vars = ", n_voff)
         println("  S[1,1] target = ", s1_q, ", solved S[1,1] = ", sdiag_q[1])
         println("  constraint max errors (abs): D*r = ", err_r.abs,
-            ", D*r^3 = ", err_r3.abs,
-            ", D*r^5 = ", err_r5.abs,
-            ", D*r^7 = ", err_r7.abs,
-            ", quadrature = ", quad_err)
+                ", D*r^3 = ", err_r3.abs,
+                ", D*r^5 = ", err_r5.abs,
+                ", D*r^7 = ", err_r7.abs,
+                ", quadrature = ", quad_err)
         println("  SPD checks: S symmetric = ", s_sym,
-            ", S positive = ", s_pd,
-            ", V symmetric = ", v_sym,
-            ", V boundary PD = ", v_boundary_pd,
-            ", V full PD = ", v_pd)
+                ", S positive = ", s_pd,
+                ", V symmetric = ", v_sym,
+                ", V boundary PD = ", v_boundary_pd,
+                ", V full PD = ", v_pd)
         if stability_check
             println("  stability: max real eig(D*G) = ", max_real_L,
-                ", max |imag eig(D*G)| = ", max_abs_imag_L,
-                ", spectral_ok = ", spectrum_ok)
+                    ", max |imag eig(D*G)| = ", max_abs_imag_L,
+                    ", spectral_ok = ", spectrum_ok)
         end
-        println("  boundary/interface smoothness: |V[$pair_rows,$pair_rows] - S[$(pair_rows + 1),$(pair_rows + 1)]| = ", interface_jump)
+        println("  boundary/interface smoothness: |V[$pair_rows,$pair_rows] - S[$(pair_rows + 1),$(pair_rows + 1)]| = ",
+                interface_jump)
     end
 
-    return (
-        mode=:exact,
-        setup=setup,
-        closure_right=rows.closure_right,
-        boundary_rows=pair_rows,
-        boundary_bandwidth=boundary_bandwidth,
-        row_sets=rows,
-        termination_status=:EXACT,
-        primal_status=:EXACT,
-        dual_status=:EXACT,
-        locally_optimal=true,
-        A=A,
-        b=b,
-        tags=sys.tags,
-        x=x_exact,
-        residual=residual_exact,
-        S=S,
-        V=V,
-        D=D,
-        B=B,
-        L=L,
-        max_real_eig_L=max_real_L,
-        max_abs_imag_eig_L=max_abs_imag_L,
-        spectrum=(
-            enforce_real_negative_spectrum=enforce_real_negative_spectrum,
-            imag_tolerance=spectrum_imag_tol,
-            nonpositive_tolerance=spectrum_nonpositive_tol,
-            satisfied=spectrum_ok
-        ),
-        errors=(
-            Dr=err_r.abs,
-            Dr3=err_r3.abs,
-            Dr5=err_r5.abs,
-            Dr7=err_r7.abs,
-            Dr_rel=err_r.rel,
-            Dr3_rel=err_r3.rel,
-            Dr5_rel=err_r5.rel,
-            Dr7_rel=err_r7.rel,
-            quadrature=quad_err,
-            quadrature_rel=quad_rel,
-            interface_jump=interface_jump
-        ),
-        floating_point_accuracy=(
-            factor=floating_point_factor,
-            tolerance=fp_tol,
-            satisfied=fp_ok
-        ),
-        polish=(applied=false, accepted=false, residual_before=NaN, residual_after=NaN),
-        spd=(
-            S_symmetric=s_sym,
-            S_positive_definite=s_pd,
-            V_symmetric=v_sym,
-            V_boundary_positive_definite=v_boundary_pd,
-            V_positive_definite=v_pd
-        ),
-        coefficients=(
-            s_boundary=Float64.(sdiag_q[1:min(pair_rows, N)]),
-            v_boundary_diag=Float64.(vdiag_q[1:min(pair_rows, N)]),
-            v_boundary_offdiag=Float64.(voff_q),
-            v_offdiag_pairs=pairs,
-            v_diag_free_indices=diag_free_indices,
-            constructor_kwargs=(
-                boundary_rows=constructor_rows,
-                boundary_bandwidth=boundary_bandwidth,
-                v_boundary_diag=v_boundary_diag_constructor,
-                v_boundary_offdiag=v_boundary_offdiag_constructor
-            )
-        )
-    )
+    return (mode = :exact,
+            setup = setup,
+            closure_right = rows.closure_right,
+            boundary_rows = pair_rows,
+            boundary_bandwidth = boundary_bandwidth,
+            row_sets = rows,
+            termination_status = :EXACT,
+            primal_status = :EXACT,
+            dual_status = :EXACT,
+            locally_optimal = true,
+            A = A,
+            b = b,
+            tags = sys.tags,
+            x = x_exact,
+            residual = residual_exact,
+            S = S,
+            V = V,
+            D = D,
+            B = B,
+            L = L,
+            max_real_eig_L = max_real_L,
+            max_abs_imag_eig_L = max_abs_imag_L,
+            spectrum = (enforce_real_negative_spectrum = enforce_real_negative_spectrum,
+                        imag_tolerance = spectrum_imag_tol,
+                        nonpositive_tolerance = spectrum_nonpositive_tol,
+                        satisfied = spectrum_ok),
+            errors = (Dr = err_r.abs,
+                      Dr3 = err_r3.abs,
+                      Dr5 = err_r5.abs,
+                      Dr7 = err_r7.abs,
+                      Dr_rel = err_r.rel,
+                      Dr3_rel = err_r3.rel,
+                      Dr5_rel = err_r5.rel,
+                      Dr7_rel = err_r7.rel,
+                      quadrature = quad_err,
+                      quadrature_rel = quad_rel,
+                      interface_jump = interface_jump),
+            floating_point_accuracy = (factor = floating_point_factor,
+                                       tolerance = fp_tol,
+                                       satisfied = fp_ok),
+            polish = (applied = false, accepted = false, residual_before = NaN,
+                      residual_after = NaN),
+            spd = (S_symmetric = s_sym,
+                   S_positive_definite = s_pd,
+                   V_symmetric = v_sym,
+                   V_boundary_positive_definite = v_boundary_pd,
+                   V_positive_definite = v_pd),
+            coefficients = (s_boundary = Float64.(sdiag_q[1:min(pair_rows, N)]),
+                            v_boundary_diag = Float64.(vdiag_q[1:min(pair_rows, N)]),
+                            v_boundary_offdiag = Float64.(voff_q),
+                            v_offdiag_pairs = pairs,
+                            v_diag_free_indices = diag_free_indices,
+                            constructor_kwargs = (boundary_rows = constructor_rows,
+                                                  boundary_bandwidth = boundary_bandwidth,
+                                                  v_boundary_diag = v_boundary_diag_constructor,
+                                                  v_boundary_offdiag = v_boundary_offdiag_constructor)))
 end
 
 """
@@ -975,59 +960,58 @@ Core structure:
 - regularized objective preserving folded Cartesian morphology.
 """
 function sbp8_solve_accuracy_constraints(setup::NamedTuple;
-    boundary_rows::Union{Nothing,Int}=nothing,
-    boundary_bandwidth::Int=7,
-    boundary_closure::Union{Nothing,Int}=nothing,
-    first_rows_r7::Int=6,
-    exact_solve::Bool=true,
-    v_diag_free_end::Union{Nothing,Int}=nothing,
-    s1_target::Union{Nothing,Real}=nothing,
-    s1_target_factor::Float64=0.55,
-    lambda_s::Float64=1e-3,
-    lambda_vs::Float64=1e-4,
-    s_min::Float64=1e-12,
-    spd_margin::Float64=1e-12,
-    ipopt_max_iter::Int=20000,
-    ipopt_tol::Float64=1e-8,
-    ipopt_acceptable_tol::Float64=1e-4,
-    ipopt_constr_viol_tol::Float64=1e-8,
-    ipopt_print_level::Int=0,
-    post_polish::Bool=true,
-    post_polish_tol::Float64=1e-12,
-    enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=5e4,
-    enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=5e-6,
-    spectrum_nonpositive_tol::Float64=1e-8,
-    stability_check::Bool=true,
-    verbose::Bool=true)
+                                         boundary_rows::Union{Nothing, Int} = nothing,
+                                         boundary_bandwidth::Int = 7,
+                                         boundary_closure::Union{Nothing, Int} = nothing,
+                                         first_rows_r7::Int = 6,
+                                         exact_solve::Bool = true,
+                                         v_diag_free_end::Union{Nothing, Int} = nothing,
+                                         s1_target::Union{Nothing, Real} = nothing,
+                                         s1_target_factor::Float64 = 0.55,
+                                         lambda_s::Float64 = 1.0e-3,
+                                         lambda_vs::Float64 = 1.0e-4,
+                                         s_min::Float64 = 1.0e-12,
+                                         spd_margin::Float64 = 1.0e-12,
+                                         ipopt_max_iter::Int = 20000,
+                                         ipopt_tol::Float64 = 1.0e-8,
+                                         ipopt_acceptable_tol::Float64 = 1.0e-4,
+                                         ipopt_constr_viol_tol::Float64 = 1.0e-8,
+                                         ipopt_print_level::Int = 0,
+                                         post_polish::Bool = true,
+                                         post_polish_tol::Float64 = 1.0e-12,
+                                         enforce_fp_accuracy::Bool = true,
+                                         floating_point_factor::Float64 = 5.0e4,
+                                         enforce_real_negative_spectrum::Bool = true,
+                                         spectrum_imag_tol::Float64 = 5.0e-6,
+                                         spectrum_nonpositive_tol::Float64 = 1.0e-8,
+                                         stability_check::Bool = true,
+                                         verbose::Bool = true)
     hasproperty(setup, :r) || throw(ArgumentError("`setup` must include `r`."))
     hasproperty(setup, :Geven) || throw(ArgumentError("`setup` must include `Geven`."))
     hasproperty(setup, :Sdiag) || throw(ArgumentError("`setup` must include `Sdiag`."))
     hasproperty(setup, :p) || throw(ArgumentError("`setup` must include `p`."))
     hasproperty(setup, :R) || throw(ArgumentError("`setup` must include `R`."))
-    s_min > 0 || throw(ArgumentError("`s_min` must be strictly positive to keep S invertible."))
+    s_min > 0 ||
+        throw(ArgumentError("`s_min` must be strictly positive to keep S invertible."))
 
     if exact_solve
         try
-            return _sbp8_solve_accuracy_constraints_exact(
-                setup;
-                boundary_rows=boundary_rows,
-                boundary_bandwidth=boundary_bandwidth,
-                boundary_closure=boundary_closure,
-                first_rows_r7=first_rows_r7,
-                v_diag_free_end=v_diag_free_end,
-                s1_target=s1_target,
-                s1_target_factor=s1_target_factor,
-                s_min=s_min,
-                enforce_fp_accuracy=enforce_fp_accuracy,
-                floating_point_factor=floating_point_factor,
-                enforce_real_negative_spectrum=enforce_real_negative_spectrum,
-                spectrum_imag_tol=spectrum_imag_tol,
-                spectrum_nonpositive_tol=spectrum_nonpositive_tol,
-                stability_check=stability_check,
-                verbose=verbose
-            )
+            return _sbp8_solve_accuracy_constraints_exact(setup;
+                                                          boundary_rows = boundary_rows,
+                                                          boundary_bandwidth = boundary_bandwidth,
+                                                          boundary_closure = boundary_closure,
+                                                          first_rows_r7 = first_rows_r7,
+                                                          v_diag_free_end = v_diag_free_end,
+                                                          s1_target = s1_target,
+                                                          s1_target_factor = s1_target_factor,
+                                                          s_min = s_min,
+                                                          enforce_fp_accuracy = enforce_fp_accuracy,
+                                                          floating_point_factor = floating_point_factor,
+                                                          enforce_real_negative_spectrum = enforce_real_negative_spectrum,
+                                                          spectrum_imag_tol = spectrum_imag_tol,
+                                                          spectrum_nonpositive_tol = spectrum_nonpositive_tol,
+                                                          stability_check = stability_check,
+                                                          verbose = verbose)
         catch err
             if verbose
                 println("SBP8 exact solve failed (", typeof(err), "): ", err)
@@ -1052,11 +1036,9 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     boundary_rows_auto = min(N, 2 * closure_auto)
     nb = isnothing(boundary_rows) ? boundary_rows_auto : clamp(Int(boundary_rows), 1, N)
 
-    pairs = sbp8_v_offdiag_pairs(
-        N;
-        boundary_rows=nb,
-        boundary_bandwidth=boundary_bandwidth
-    )
+    pairs = sbp8_v_offdiag_pairs(N;
+                                 boundary_rows = nb,
+                                 boundary_bandwidth = boundary_bandwidth)
     npairs = length(pairs)
 
     G = Matrix(Geven)
@@ -1071,8 +1053,8 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     JuMP.set_optimizer_attribute(model, "max_iter", ipopt_max_iter)
     JuMP.set_optimizer_attribute(model, "print_level", ipopt_print_level)
 
-    JuMP.@variable(model, s[1:nb] >= s_min)
-    JuMP.@variable(model, vdiag[1:nb] >= s_min)
+    JuMP.@variable(model, s[1:nb]>=s_min)
+    JuMP.@variable(model, vdiag[1:nb]>=s_min)
     if npairs > 0
         JuMP.@variable(model, voff[1:npairs])
         @inbounds for k in 1:npairs
@@ -1089,7 +1071,7 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     JuMP.@variable(model, L[1:nb, 1:nb])
     for i in 1:nb
         for j in (i + 1):nb
-            JuMP.fix(L[i, j], 0.0; force=true)
+            JuMP.fix(L[i, j], 0.0; force = true)
         end
         JuMP.set_lower_bound(L[i, i], sqrt(spd_margin))
         JuMP.set_start_value(L[i, i], sqrt(max(spd_margin, s_target[i])))
@@ -1098,7 +1080,7 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
         end
     end
 
-    pair_to_idx = Dict{Tuple{Int,Int},Int}()
+    pair_to_idx = Dict{Tuple{Int, Int}, Int}()
     if npairs > 0
         @inbounds for (k, (i, j)) in enumerate(pairs)
             pair_to_idx[(i, j)] = k
@@ -1108,13 +1090,14 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     for i in 1:nb
         for j in 1:i
             if i == j
-                JuMP.@NLconstraint(model, vdiag[i] == sum(L[i, k]^2 for k in 1:i))
+                JuMP.@NLconstraint(model, vdiag[i]==sum(L[i, k]^2 for k in 1:i))
             else
                 idx = get(pair_to_idx, (j, i), 0)
                 if idx > 0
-                    JuMP.@NLconstraint(model, voff[idx] == sum(L[i, k] * L[j, k] for k in 1:j))
+                    JuMP.@NLconstraint(model,
+                                       voff[idx]==sum(L[i, k] * L[j, k] for k in 1:j))
                 else
-                    JuMP.@NLconstraint(model, sum(L[i, k] * L[j, k] for k in 1:j) == 0.0)
+                    JuMP.@NLconstraint(model, sum(L[i, k] * L[j, k] for k in 1:j)==0.0)
                 end
             end
         end
@@ -1122,7 +1105,7 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
 
     if npairs == 0
         for i in 1:nb
-            JuMP.@constraint(model, vdiag[i] >= spd_margin)
+            JuMP.@constraint(model, vdiag[i]>=spd_margin)
         end
     end
 
@@ -1164,7 +1147,7 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
             end
 
             expr.constant = constant
-            JuMP.@constraint(model, expr == 0.0)
+            JuMP.@constraint(model, expr==0.0)
         end
         return nothing
     end
@@ -1175,21 +1158,19 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     add_degree_constraints!(7, rows.rows_r7)
 
     const_tail = nb < N ? sum(s_target[(nb + 1):N]) : 0.0
-    JuMP.@constraint(model, sum(s[i] for i in 1:nb) + const_tail == quad_target)
+    JuMP.@constraint(model, sum(s[i] for i in 1:nb) + const_tail==quad_target)
 
     if npairs > 0
         JuMP.@objective(model, Min,
-            lambda_s * sum((s[i] - s_target[i])^2 for i in 1:nb) +
-            lambda_vs * (
-                sum((vdiag[i] - s[i])^2 for i in 1:nb) +
-                2.0 * sum(voff[k]^2 for k in 1:npairs)
-            )
-        )
+                        lambda_s *
+                        sum((s[i] - s_target[i])^2 for i in 1:nb)+
+                        lambda_vs * (sum((vdiag[i] - s[i])^2 for i in 1:nb) +
+                         2.0 * sum(voff[k]^2 for k in 1:npairs)))
     else
         JuMP.@objective(model, Min,
-            lambda_s * sum((s[i] - s_target[i])^2 for i in 1:nb) +
-            lambda_vs * sum((vdiag[i] - s[i])^2 for i in 1:nb)
-        )
+                        lambda_s *
+                        sum((s[i] - s_target[i])^2 for i in 1:nb)+
+                        lambda_vs * sum((vdiag[i] - s[i])^2 for i in 1:nb))
     end
 
     JuMP.optimize!(model)
@@ -1197,7 +1178,8 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     term = JuMP.termination_status(model)
     primal = JuMP.primal_status(model)
     dual = JuMP.dual_status(model)
-    locally_optimal = term == _SBP8_MOI.LOCALLY_SOLVED || term == _SBP8_MOI.ALMOST_LOCALLY_SOLVED
+    locally_optimal = term == _SBP8_MOI.LOCALLY_SOLVED ||
+                      term == _SBP8_MOI.ALMOST_LOCALLY_SOLVED
 
     JuMP.has_values(model) ||
         throw(ArgumentError("SBP8 JuMP model has no primal solution values (termination_status=$term, primal_status=$primal)."))
@@ -1212,7 +1194,8 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
 
     # Optional exact linear-polish on (s_boundary, v_boundary_diag, v_boundary_offdiag)
     # to drive enforced accuracy/quadrature constraints to machine precision.
-    polished = (applied=false, accepted=false, residual_before=NaN, residual_after=NaN)
+    polished = (applied = false, accepted = false, residual_before = NaN,
+                residual_after = NaN)
     if post_polish
         nvar = 2 * nb + npairs
         x0 = zeros(Float64, nvar)
@@ -1224,17 +1207,14 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
             x0[2 * nb + k] = v_boundary_offdiag[k]
         end
 
-        sys = _sbp8_build_linear_constraint_system(
-            r, G, s_target, p, rows, nb, pairs, quad_target
-        )
+        sys = _sbp8_build_linear_constraint_system(r, G, s_target, p, rows, nb, pairs,
+                                                   quad_target)
         res0 = isempty(sys.b) ? 0.0 : maximum(abs.(sys.A * x0 .- sys.b))
         pol = _sbp8_polish_linear_constraints(x0, sys.A, sys.b)
-        polished = (
-            applied=true,
-            accepted=false,
-            residual_before=res0,
-            residual_after=pol.residual
-        )
+        polished = (applied = true,
+                    accepted = false,
+                    residual_before = res0,
+                    residual_after = pol.residual)
 
         if pol.success
             x = pol.x
@@ -1244,16 +1224,14 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
 
             # Keep polished values only if positivity and boundary SPD are preserved.
             s_ok = all(si -> si > s_min, s_try)
-            Vtry = sbp8_vector_mass(
-                vcat(s_try, s_target[(nb + 1):end]);
-                boundary_rows=nb,
-                boundary_bandwidth=boundary_bandwidth,
-                v_boundary_diag=vd_try,
-                v_boundary_offdiag=vo_try
-            )
+            Vtry = sbp8_vector_mass(vcat(s_try, s_target[(nb + 1):end]);
+                                    boundary_rows = nb,
+                                    boundary_bandwidth = boundary_bandwidth,
+                                    v_boundary_diag = vd_try,
+                                    v_boundary_offdiag = vo_try)
             Vb_try = Matrix{Float64}(Vtry[1:nb, 1:nb])
             v_ok = try
-                LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Vb_try); check=true)
+                LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Vb_try); check = true)
                 true
             catch
                 false
@@ -1267,12 +1245,10 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
                     throw(ArgumentError("Post-polish SBP8 solution violates invertibility at origin: S[1,1] = $(s_boundary[1]) <= s_min = $s_min."))
                 v_boundary_diag = collect(vd_try)
                 v_boundary_offdiag = collect(vo_try)
-                polished = (
-                    applied=true,
-                    accepted=true,
-                    residual_before=res0,
-                    residual_after=pol.residual
-                )
+                polished = (applied = true,
+                            accepted = true,
+                            residual_before = res0,
+                            residual_after = pol.residual)
             end
         end
     end
@@ -1283,15 +1259,13 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     end
 
     S = spdiagm(0 => sdiag)
-    V = sbp8_vector_mass(
-        sdiag;
-        boundary_rows=nb,
-        boundary_bandwidth=boundary_bandwidth,
-        v_boundary_diag=v_boundary_diag,
-        v_boundary_offdiag=v_boundary_offdiag
-    )
+    V = sbp8_vector_mass(sdiag;
+                         boundary_rows = nb,
+                         boundary_bandwidth = boundary_bandwidth,
+                         v_boundary_diag = v_boundary_diag,
+                         v_boundary_offdiag = v_boundary_offdiag)
 
-    div_data = sbp8_construct_divergence(S, V, Geven, r; p=p)
+    div_data = sbp8_construct_divergence(S, V, Geven, r; p = p)
     D = div_data.D
     B = div_data.B
 
@@ -1311,7 +1285,7 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
 
     Vb = Matrix{Float64}(V[1:nb, 1:nb])
     v_boundary_pd = try
-        LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Vb); check=true)
+        LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Vb); check = true)
         true
     catch
         false
@@ -1319,16 +1293,16 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
     v_pd = _sbp8_is_pd(V)
 
     L = sparse(D * Geven)
-    eigvals_L = stability_check || enforce_real_negative_spectrum ? _high_precision_schur_values(Matrix(L)) : Complex{Float64x4}[]
+    eigvals_L = stability_check || enforce_real_negative_spectrum ?
+                _high_precision_schur_values(Matrix(L)) : Complex{Float64x4}[]
     max_real_L = isempty(eigvals_L) ? NaN : maximum(Float64.(real.(eigvals_L)))
     max_abs_imag_L = isempty(eigvals_L) ? NaN : maximum(Float64.(abs.(imag.(eigvals_L))))
     spectrum_ok = isempty(eigvals_L) ? true :
-                  (max_abs_imag_L <= spectrum_imag_tol && max_real_L <= spectrum_nonpositive_tol)
+                  (max_abs_imag_L <= spectrum_imag_tol &&
+                   max_real_L <= spectrum_nonpositive_tol)
     if enforce_real_negative_spectrum && !spectrum_ok
-        throw(ArgumentError(
-            "SBP8 spectrum check failed: max_abs_imag_eig=$(max_abs_imag_L), " *
-            "max_real_eig=$(max_real_L), thresholds=(imag<=$(spectrum_imag_tol), real<=$(spectrum_nonpositive_tol))."
-        ))
+        throw(ArgumentError("SBP8 spectrum check failed: max_abs_imag_eig=$(max_abs_imag_L), " *
+                            "max_real_eig=$(max_real_L), thresholds=(imag<=$(spectrum_imag_tol), real<=$(spectrum_nonpositive_tol))."))
     end
 
     interface_jump = nb < N ? abs(v_boundary_diag[end] - s_target[nb + 1]) : 0.0
@@ -1340,115 +1314,100 @@ function sbp8_solve_accuracy_constraints(setup::NamedTuple;
             (err_r7.rel <= fp_tol) &&
             (quad_rel <= fp_tol)
     if enforce_fp_accuracy && !fp_ok
-        throw(ArgumentError(
-            "SBP8 accuracy constraints are not at floating-point level. " *
-            "rel-errors: Dr=$(err_r.rel), Dr3=$(err_r3.rel), Dr5=$(err_r5.rel), " *
-            "Dr7=$(err_r7.rel), quadrature=$(quad_rel); threshold=$(fp_tol)."
-        ))
+        throw(ArgumentError("SBP8 accuracy constraints are not at floating-point level. " *
+                            "rel-errors: Dr=$(err_r.rel), Dr3=$(err_r3.rel), Dr5=$(err_r5.rel), " *
+                            "Dr7=$(err_r7.rel), quadrature=$(quad_rel); threshold=$(fp_tol)."))
     end
 
     if verbose
         println("SBP8 JuMP solve:")
         println("  term = ", term, ", primal = ", primal, ", dual = ", dual,
-            ", locally_optimal = ", locally_optimal)
+                ", locally_optimal = ", locally_optimal)
         println("  right closure = ", rows.closure_right,
-            ", boundary rows = ", nb,
-            ", boundary bandwidth = ", boundary_bandwidth,
-            ", offdiag vars = ", npairs)
+                ", boundary rows = ", nb,
+                ", boundary bandwidth = ", boundary_bandwidth,
+                ", offdiag vars = ", npairs)
         println("  constraint max errors (abs): D*r = ", err_r.abs,
-            ", D*r^3 = ", err_r3.abs,
-            ", D*r^5 = ", err_r5.abs,
-            ", D*r^7 = ", err_r7.abs,
-            ", quadrature = ", quad_err)
+                ", D*r^3 = ", err_r3.abs,
+                ", D*r^5 = ", err_r5.abs,
+                ", D*r^7 = ", err_r7.abs,
+                ", quadrature = ", quad_err)
         println("  constraint max errors (rel): D*r = ", err_r.rel,
-            ", D*r^3 = ", err_r3.rel,
-            ", D*r^5 = ", err_r5.rel,
-            ", D*r^7 = ", err_r7.rel,
-            ", quadrature = ", quad_rel,
-            ", fp_tol = ", fp_tol,
-            ", fp_ok = ", fp_ok)
+                ", D*r^3 = ", err_r3.rel,
+                ", D*r^5 = ", err_r5.rel,
+                ", D*r^7 = ", err_r7.rel,
+                ", quadrature = ", quad_rel,
+                ", fp_tol = ", fp_tol,
+                ", fp_ok = ", fp_ok)
         if post_polish
             println("  post-polish: applied = ", polished.applied,
-                ", accepted = ", polished.accepted,
-                ", residual(before) = ", polished.residual_before,
-                ", residual(after) = ", polished.residual_after)
+                    ", accepted = ", polished.accepted,
+                    ", residual(before) = ", polished.residual_before,
+                    ", residual(after) = ", polished.residual_after)
         end
         println("  SPD checks: S symmetric = ", s_sym,
-            ", S positive = ", s_pd,
-            ", V symmetric = ", v_sym,
-            ", V boundary PD = ", v_boundary_pd,
-            ", V full PD = ", v_pd)
+                ", S positive = ", s_pd,
+                ", V symmetric = ", v_sym,
+                ", V boundary PD = ", v_boundary_pd,
+                ", V full PD = ", v_pd)
         if stability_check
             println("  stability: max real eig(D*G) = ", max_real_L,
-                ", max |imag eig(D*G)| = ", max_abs_imag_L,
-                ", spectral_ok = ", spectrum_ok)
+                    ", max |imag eig(D*G)| = ", max_abs_imag_L,
+                    ", spectral_ok = ", spectrum_ok)
         end
-        println("  boundary/interface smoothness: |V[$nb,$nb] - S[$(nb + 1),$(nb + 1)]| = ", interface_jump)
+        println("  boundary/interface smoothness: |V[$nb,$nb] - S[$(nb + 1),$(nb + 1)]| = ",
+                interface_jump)
     end
 
-    return (
-        mode=:jump_ipopt,
-        setup=setup,
-        closure_right=rows.closure_right,
-        boundary_rows=nb,
-        boundary_bandwidth=boundary_bandwidth,
-        row_sets=rows,
-        termination_status=term,
-        primal_status=primal,
-        dual_status=dual,
-        locally_optimal=locally_optimal,
-        S=S,
-        V=V,
-        D=D,
-        B=B,
-        L=L,
-        max_real_eig_L=max_real_L,
-        max_abs_imag_eig_L=max_abs_imag_L,
-        spectrum=(
-            enforce_real_negative_spectrum=enforce_real_negative_spectrum,
-            imag_tolerance=spectrum_imag_tol,
-            nonpositive_tolerance=spectrum_nonpositive_tol,
-            satisfied=spectrum_ok
-        ),
-        errors=(
-            Dr=err_r.abs,
-            Dr3=err_r3.abs,
-            Dr5=err_r5.abs,
-            Dr7=err_r7.abs,
-            Dr_rel=err_r.rel,
-            Dr3_rel=err_r3.rel,
-            Dr5_rel=err_r5.rel,
-            Dr7_rel=err_r7.rel,
-            quadrature=quad_err,
-            quadrature_rel=quad_rel,
-            interface_jump=interface_jump
-        ),
-        floating_point_accuracy=(
-            factor=floating_point_factor,
-            tolerance=fp_tol,
-            satisfied=fp_ok
-        ),
-        polish=polished,
-        spd=(
-            S_symmetric=s_sym,
-            S_positive_definite=s_pd,
-            V_symmetric=v_sym,
-            V_boundary_positive_definite=v_boundary_pd,
-            V_positive_definite=v_pd
-        ),
-        coefficients=(
-            s_boundary=s_boundary,
-            v_boundary_diag=v_boundary_diag,
-            v_boundary_offdiag=v_boundary_offdiag,
-            v_offdiag_pairs=pairs,
-            constructor_kwargs=(
-                boundary_rows=nb,
-                boundary_bandwidth=boundary_bandwidth,
-                v_boundary_diag=v_boundary_diag,
-                v_boundary_offdiag=v_boundary_offdiag
-            )
-        )
-    )
+    return (mode = :jump_ipopt,
+            setup = setup,
+            closure_right = rows.closure_right,
+            boundary_rows = nb,
+            boundary_bandwidth = boundary_bandwidth,
+            row_sets = rows,
+            termination_status = term,
+            primal_status = primal,
+            dual_status = dual,
+            locally_optimal = locally_optimal,
+            S = S,
+            V = V,
+            D = D,
+            B = B,
+            L = L,
+            max_real_eig_L = max_real_L,
+            max_abs_imag_eig_L = max_abs_imag_L,
+            spectrum = (enforce_real_negative_spectrum = enforce_real_negative_spectrum,
+                        imag_tolerance = spectrum_imag_tol,
+                        nonpositive_tolerance = spectrum_nonpositive_tol,
+                        satisfied = spectrum_ok),
+            errors = (Dr = err_r.abs,
+                      Dr3 = err_r3.abs,
+                      Dr5 = err_r5.abs,
+                      Dr7 = err_r7.abs,
+                      Dr_rel = err_r.rel,
+                      Dr3_rel = err_r3.rel,
+                      Dr5_rel = err_r5.rel,
+                      Dr7_rel = err_r7.rel,
+                      quadrature = quad_err,
+                      quadrature_rel = quad_rel,
+                      interface_jump = interface_jump),
+            floating_point_accuracy = (factor = floating_point_factor,
+                                       tolerance = fp_tol,
+                                       satisfied = fp_ok),
+            polish = polished,
+            spd = (S_symmetric = s_sym,
+                   S_positive_definite = s_pd,
+                   V_symmetric = v_sym,
+                   V_boundary_positive_definite = v_boundary_pd,
+                   V_positive_definite = v_pd),
+            coefficients = (s_boundary = s_boundary,
+                            v_boundary_diag = v_boundary_diag,
+                            v_boundary_offdiag = v_boundary_offdiag,
+                            v_offdiag_pairs = pairs,
+                            constructor_kwargs = (boundary_rows = nb,
+                                                  boundary_bandwidth = boundary_bandwidth,
+                                                  v_boundary_diag = v_boundary_diag,
+                                                  v_boundary_offdiag = v_boundary_offdiag)))
 end
 
 """
@@ -1458,83 +1417,77 @@ Convenience overload: build folded SBP8 setup via `sbp8_scalar_mass_gradient`, t
 solve for boundary split-mass coefficients with JuMP/Ipopt.
 """
 function sbp8_solve_accuracy_constraints(source;
-    accuracy_order::Int=8,
-    points::Int=21,
-    h::Real=1,
-    N=points - 1,
-    R=h * (points - 1),
-    p::Int=2,
-    mode=SafeMode(),
-    build_matrix::Symbol=:probe,
-    atol=nothing,
-    boundary_rows::Union{Nothing,Int}=nothing,
-    boundary_bandwidth::Int=7,
-    boundary_closure::Union{Nothing,Int}=nothing,
-    first_rows_r7::Int=6,
-    exact_solve::Bool=true,
-    v_diag_free_end::Union{Nothing,Int}=nothing,
-    s1_target::Union{Nothing,Real}=nothing,
-    s1_target_factor::Float64=0.55,
-    lambda_s::Float64=1e-3,
-    lambda_vs::Float64=1e-4,
-    s_min::Float64=1e-12,
-    spd_margin::Float64=1e-12,
-    ipopt_max_iter::Int=20000,
-    ipopt_tol::Float64=1e-8,
-    ipopt_acceptable_tol::Float64=1e-4,
-    ipopt_constr_viol_tol::Float64=1e-8,
-    ipopt_print_level::Int=0,
-    post_polish::Bool=true,
-    post_polish_tol::Float64=1e-12,
-    enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=5e4,
-    enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=5e-6,
-    spectrum_nonpositive_tol::Float64=1e-8,
-    stability_check::Bool=true,
-    verbose::Bool=true)
-    setup = sbp8_scalar_mass_gradient(
-        source;
-        accuracy_order=accuracy_order,
-        points=points,
-        h=h,
-        N=N,
-        R=R,
-        p=p,
-        mode=mode,
-        build_matrix=build_matrix,
-        atol=atol
-    )
+                                         accuracy_order::Int = 8,
+                                         points::Int = 21,
+                                         h::Real = 1,
+                                         N = points - 1,
+                                         R = h * (points - 1),
+                                         p::Int = 2,
+                                         mode = SafeMode(),
+                                         atol = nothing,
+                                         boundary_rows::Union{Nothing, Int} = nothing,
+                                         boundary_bandwidth::Int = 7,
+                                         boundary_closure::Union{Nothing, Int} = nothing,
+                                         first_rows_r7::Int = 6,
+                                         exact_solve::Bool = true,
+                                         v_diag_free_end::Union{Nothing, Int} = nothing,
+                                         s1_target::Union{Nothing, Real} = nothing,
+                                         s1_target_factor::Float64 = 0.55,
+                                         lambda_s::Float64 = 1.0e-3,
+                                         lambda_vs::Float64 = 1.0e-4,
+                                         s_min::Float64 = 1.0e-12,
+                                         spd_margin::Float64 = 1.0e-12,
+                                         ipopt_max_iter::Int = 20000,
+                                         ipopt_tol::Float64 = 1.0e-8,
+                                         ipopt_acceptable_tol::Float64 = 1.0e-4,
+                                         ipopt_constr_viol_tol::Float64 = 1.0e-8,
+                                         ipopt_print_level::Int = 0,
+                                         post_polish::Bool = true,
+                                         post_polish_tol::Float64 = 1.0e-12,
+                                         enforce_fp_accuracy::Bool = true,
+                                         floating_point_factor::Float64 = 5.0e4,
+                                         enforce_real_negative_spectrum::Bool = true,
+                                         spectrum_imag_tol::Float64 = 5.0e-6,
+                                         spectrum_nonpositive_tol::Float64 = 1.0e-8,
+                                         stability_check::Bool = true,
+                                         verbose::Bool = true)
+    setup = sbp8_scalar_mass_gradient(source;
+                                      accuracy_order = accuracy_order,
+                                      points = points,
+                                      h = h,
+                                      N = N,
+                                      R = R,
+                                      p = p,
+                                      mode = mode,
+                                      atol = atol)
 
-    return sbp8_solve_accuracy_constraints(
-        setup;
-        boundary_rows=boundary_rows,
-        boundary_bandwidth=boundary_bandwidth,
-        boundary_closure=boundary_closure,
-        first_rows_r7=first_rows_r7,
-        exact_solve=exact_solve,
-        v_diag_free_end=v_diag_free_end,
-        s1_target=s1_target,
-        s1_target_factor=s1_target_factor,
-        lambda_s=lambda_s,
-        lambda_vs=lambda_vs,
-        s_min=s_min,
-        spd_margin=spd_margin,
-        ipopt_max_iter=ipopt_max_iter,
-        ipopt_tol=ipopt_tol,
-        ipopt_acceptable_tol=ipopt_acceptable_tol,
-        ipopt_constr_viol_tol=ipopt_constr_viol_tol,
-        ipopt_print_level=ipopt_print_level,
-        post_polish=post_polish,
-        post_polish_tol=post_polish_tol,
-        enforce_fp_accuracy=enforce_fp_accuracy,
-        floating_point_factor=floating_point_factor,
-        enforce_real_negative_spectrum=enforce_real_negative_spectrum,
-        spectrum_imag_tol=spectrum_imag_tol,
-        spectrum_nonpositive_tol=spectrum_nonpositive_tol,
-        stability_check=stability_check,
-        verbose=verbose
-    )
+    return sbp8_solve_accuracy_constraints(setup;
+                                           boundary_rows = boundary_rows,
+                                           boundary_bandwidth = boundary_bandwidth,
+                                           boundary_closure = boundary_closure,
+                                           first_rows_r7 = first_rows_r7,
+                                           exact_solve = exact_solve,
+                                           v_diag_free_end = v_diag_free_end,
+                                           s1_target = s1_target,
+                                           s1_target_factor = s1_target_factor,
+                                           lambda_s = lambda_s,
+                                           lambda_vs = lambda_vs,
+                                           s_min = s_min,
+                                           spd_margin = spd_margin,
+                                           ipopt_max_iter = ipopt_max_iter,
+                                           ipopt_tol = ipopt_tol,
+                                           ipopt_acceptable_tol = ipopt_acceptable_tol,
+                                           ipopt_constr_viol_tol = ipopt_constr_viol_tol,
+                                           ipopt_print_level = ipopt_print_level,
+                                           post_polish = post_polish,
+                                           post_polish_tol = post_polish_tol,
+                                           enforce_fp_accuracy = enforce_fp_accuracy,
+                                           floating_point_factor = floating_point_factor,
+                                           enforce_real_negative_spectrum = enforce_real_negative_spectrum,
+                                           spectrum_imag_tol = spectrum_imag_tol,
+                                           spectrum_nonpositive_tol = spectrum_nonpositive_tol,
+                                           stability_check = stability_check,
+                                           verbose = verbose)
 end
 
 """
@@ -1544,84 +1497,78 @@ Build non-diagonal-mass SBP8 operators by solving the split-mass optimization,
 then return `(D, G, S, V, B)`.
 """
 function sbp8_operators(source,
-    points::Integer;
-    h::Real=1,
-    accuracy_order::Int=8,
-    p::Int=2,
-    mode=SafeMode(),
-    build_matrix::Symbol=:probe,
-    atol=nothing,
-    boundary_rows::Union{Nothing,Int}=nothing,
-    boundary_bandwidth::Int=7,
-    boundary_closure::Union{Nothing,Int}=nothing,
-    first_rows_r7::Int=6,
-    exact_solve::Bool=true,
-    v_diag_free_end::Union{Nothing,Int}=nothing,
-    s1_target::Union{Nothing,Real}=nothing,
-    s1_target_factor::Float64=0.55,
-    lambda_s::Float64=1e-3,
-    lambda_vs::Float64=1e-4,
-    s_min::Float64=1e-12,
-    spd_margin::Float64=1e-12,
-    ipopt_max_iter::Int=20000,
-    ipopt_tol::Float64=1e-8,
-    ipopt_acceptable_tol::Float64=1e-4,
-    ipopt_constr_viol_tol::Float64=1e-8,
-    ipopt_print_level::Int=0,
-    post_polish::Bool=true,
-    post_polish_tol::Float64=1e-12,
-    enforce_fp_accuracy::Bool=true,
-    floating_point_factor::Float64=5e4,
-    enforce_real_negative_spectrum::Bool=true,
-    spectrum_imag_tol::Float64=5e-6,
-    spectrum_nonpositive_tol::Float64=1e-8,
-    stability_check::Bool=true,
-    verbose::Bool=false)
+                        points::Integer;
+                        h::Real = 1,
+                        accuracy_order::Int = 8,
+                        p::Int = 2,
+                        mode = SafeMode(),
+                        atol = nothing,
+                        boundary_rows::Union{Nothing, Int} = nothing,
+                        boundary_bandwidth::Int = 7,
+                        boundary_closure::Union{Nothing, Int} = nothing,
+                        first_rows_r7::Int = 6,
+                        exact_solve::Bool = true,
+                        v_diag_free_end::Union{Nothing, Int} = nothing,
+                        s1_target::Union{Nothing, Real} = nothing,
+                        s1_target_factor::Float64 = 0.55,
+                        lambda_s::Float64 = 1.0e-3,
+                        lambda_vs::Float64 = 1.0e-4,
+                        s_min::Float64 = 1.0e-12,
+                        spd_margin::Float64 = 1.0e-12,
+                        ipopt_max_iter::Int = 20000,
+                        ipopt_tol::Float64 = 1.0e-8,
+                        ipopt_acceptable_tol::Float64 = 1.0e-4,
+                        ipopt_constr_viol_tol::Float64 = 1.0e-8,
+                        ipopt_print_level::Int = 0,
+                        post_polish::Bool = true,
+                        post_polish_tol::Float64 = 1.0e-12,
+                        enforce_fp_accuracy::Bool = true,
+                        floating_point_factor::Float64 = 5.0e4,
+                        enforce_real_negative_spectrum::Bool = true,
+                        spectrum_imag_tol::Float64 = 5.0e-6,
+                        spectrum_nonpositive_tol::Float64 = 1.0e-8,
+                        stability_check::Bool = true,
+                        verbose::Bool = false)
     points_int = Int(points)
     points_int > 1 || throw(ArgumentError("`points` must be > 1."))
 
-    solved = sbp8_solve_accuracy_constraints(
-        source;
-        accuracy_order=accuracy_order,
-        points=points_int,
-        h=h,
-        p=p,
-        mode=mode,
-        build_matrix=build_matrix,
-        atol=atol,
-        boundary_rows=boundary_rows,
-        boundary_bandwidth=boundary_bandwidth,
-        boundary_closure=boundary_closure,
-        first_rows_r7=first_rows_r7,
-        exact_solve=exact_solve,
-        v_diag_free_end=v_diag_free_end,
-        s1_target=s1_target,
-        s1_target_factor=s1_target_factor,
-        lambda_s=lambda_s,
-        lambda_vs=lambda_vs,
-        s_min=s_min,
-        spd_margin=spd_margin,
-        ipopt_max_iter=ipopt_max_iter,
-        ipopt_tol=ipopt_tol,
-        ipopt_acceptable_tol=ipopt_acceptable_tol,
-        ipopt_constr_viol_tol=ipopt_constr_viol_tol,
-        ipopt_print_level=ipopt_print_level,
-        post_polish=post_polish,
-        post_polish_tol=post_polish_tol,
-        enforce_fp_accuracy=enforce_fp_accuracy,
-        floating_point_factor=floating_point_factor,
-        enforce_real_negative_spectrum=enforce_real_negative_spectrum,
-        spectrum_imag_tol=spectrum_imag_tol,
-        spectrum_nonpositive_tol=spectrum_nonpositive_tol,
-        stability_check=stability_check,
-        verbose=verbose
-    )
+    solved = sbp8_solve_accuracy_constraints(source;
+                                             accuracy_order = accuracy_order,
+                                             points = points_int,
+                                             h = h,
+                                             p = p,
+                                             mode = mode,
+                                             atol = atol,
+                                             boundary_rows = boundary_rows,
+                                             boundary_bandwidth = boundary_bandwidth,
+                                             boundary_closure = boundary_closure,
+                                             first_rows_r7 = first_rows_r7,
+                                             exact_solve = exact_solve,
+                                             v_diag_free_end = v_diag_free_end,
+                                             s1_target = s1_target,
+                                             s1_target_factor = s1_target_factor,
+                                             lambda_s = lambda_s,
+                                             lambda_vs = lambda_vs,
+                                             s_min = s_min,
+                                             spd_margin = spd_margin,
+                                             ipopt_max_iter = ipopt_max_iter,
+                                             ipopt_tol = ipopt_tol,
+                                             ipopt_acceptable_tol = ipopt_acceptable_tol,
+                                             ipopt_constr_viol_tol = ipopt_constr_viol_tol,
+                                             ipopt_print_level = ipopt_print_level,
+                                             post_polish = post_polish,
+                                             post_polish_tol = post_polish_tol,
+                                             enforce_fp_accuracy = enforce_fp_accuracy,
+                                             floating_point_factor = floating_point_factor,
+                                             enforce_real_negative_spectrum = enforce_real_negative_spectrum,
+                                             spectrum_imag_tol = spectrum_imag_tol,
+                                             spectrum_nonpositive_tol = spectrum_nonpositive_tol,
+                                             stability_check = stability_check,
+                                             verbose = verbose)
 
-    return (
-        D=solved.D,
-        G=solved.setup.Geven,
-        S=solved.S,
-        V=solved.V,
-        B=solved.B
-    )
+    return (D = solved.D,
+            G = solved.setup.Geven,
+            S = solved.S,
+            V = solved.V,
+            B = solved.B)
 end

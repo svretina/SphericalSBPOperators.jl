@@ -58,7 +58,8 @@ function _maxabs_sparse_rows_float(A::SparseMatrixCSC, row_mask::AbstractVector{
     return m
 end
 
-function _argmax_sparse_float(A::SparseMatrixCSC; row_mask::Union{Nothing, AbstractVector{Bool}} = nothing)
+function _argmax_sparse_float(A::SparseMatrixCSC;
+                              row_mask::Union{Nothing, AbstractVector{Bool}} = nothing)
     I, J, V = findnz(A)
     best = 0.0
     best_i = 0
@@ -122,8 +123,7 @@ function _pointwise_error_summary(err::Vector{Float64},
     origin = _region_max(err, idx_origin)
     mid = _region_max(err, idx_mid)
     boundary = _region_max(err, idx_boundary)
-    return (
-            max_error = vmax,
+    return (max_error = vmax,
             argmax_index = arg,
             argmax_r = r[arg],
             safe_max_error = safe.max_error,
@@ -134,8 +134,7 @@ function _pointwise_error_summary(err::Vector{Float64},
             mid_max_error = mid.max_error,
             mid_argmax_index = mid.argmax_index,
             near_boundary_max_error = boundary.max_error,
-            near_boundary_argmax_index = boundary.argmax_index
-           )
+            near_boundary_argmax_index = boundary.argmax_index)
 end
 
 function _table_rows(r::Vector{Float64},
@@ -148,16 +147,12 @@ function _table_rows(r::Vector{Float64},
     idx = unique(vcat(collect(1:min(np, n)), collect(max(1, n - np + 1):n)))
     rows = NamedTuple[]
     for i in idx
-        push!(
-              rows,
-              (
-               i = i,
+        push!(rows,
+              (i = i,
                r = r[i],
                numerical = numerical[i],
                exact = exact[i],
-               error = err[i]
-              )
-             )
+               error = err[i]))
     end
     return rows
 end
@@ -166,8 +161,7 @@ function _print_table(title::AbstractString, rows)
     println(title)
     println("  i         r                  numerical            exact                error")
     for row in rows
-        println(
-                "  ",
+        println("  ",
                 lpad(row.i, 3),
                 "  ",
                 lpad(string(round(row.r, sigdigits = 10)), 14),
@@ -176,9 +170,9 @@ function _print_table(title::AbstractString, rows)
                 "  ",
                 lpad(string(round(row.exact, sigdigits = 10)), 18),
                 "  ",
-                lpad(string(round(row.error, sigdigits = 6)), 12)
-               )
+                lpad(string(round(row.error, sigdigits = 6)), 12))
     end
+    return
 end
 
 """
@@ -187,28 +181,27 @@ end
 Interpret a diagnostics report and produce concise conclusions about likely error
 sources (folding maps, closure effects, operator-family expectations, origin handling).
 """
-function interpret_diagnostics(diag; tol::Float64 = 1e-10, poly_tol::Float64 = 1e-8)
+function interpret_diagnostics(diag; tol::Float64 = 1.0e-10, poly_tol::Float64 = 1.0e-8)
     conclusions = String[]
     flags = Dict{Symbol, Bool}()
 
-    grid_bad = !(diag.grid.symmetry_ok && diag.grid.uniform_ok && diag.grid.r0_ok && diag.grid.rend_ok)
+    grid_bad = !(diag.grid.symmetry_ok && diag.grid.uniform_ok && diag.grid.r0_ok &&
+                 diag.grid.rend_ok)
     flags[:grid_issue] = grid_bad
     if grid_bad
-        push!(
-              conclusions,
-              "Grid symmetry/uniformity checks failed. Polynomial exactness expectations are unreliable until grid construction is fixed."
-             )
+        push!(conclusions,
+              "Grid symmetry/uniformity checks failed. Polynomial exactness expectations are unreliable until grid construction is fixed.")
     end
 
-    extension_fail = !(diag.folding.rop_ok && diag.folding.even_even_ok && diag.folding.odd_signed_ok && diag.folding.odd_matches_xk_for_odd_k_ok)
+    extension_fail = !(diag.folding.rop_ok && diag.folding.even_even_ok &&
+                       diag.folding.odd_signed_ok &&
+                       diag.folding.odd_matches_xk_for_odd_k_ok)
     operator_mismatch = (diag.operator_consistency.geven_diff_max > tol ||
                          diag.operator_consistency.godd_diff_max > tol)
     flags[:folding_issue] = extension_fail || operator_mismatch
     if flags[:folding_issue]
-        push!(
-              conclusions,
-              "Folding/extension consistency checks indicate a map or pairing issue (Rop/Eeven/Eodd or tolerance/permutation/sign)."
-             )
+        push!(conclusions,
+              "Folding/extension consistency checks indicate a map or pairing issue (Rop/Eeven/Eodd or tolerance/permutation/sign).")
     end
 
     if !diag.polynomial.skipped
@@ -217,30 +210,25 @@ function interpret_diagnostics(diag; tol::Float64 = 1e-10, poly_tol::Float64 = 1
 
         if full_safe > poly_tol
             flags[:underlying_full_operator_issue] = true
-            push!(
-                  conclusions,
-                  "The full-grid derivative already shows non-negligible safe-interior polynomial error. This is likely operator-family behavior/expectation mismatch, not folding."
-                 )
+            push!(conclusions,
+                  "The full-grid derivative already shows non-negligible safe-interior polynomial error. This is likely operator-family behavior/expectation mismatch, not folding.")
         else
             flags[:underlying_full_operator_issue] = false
         end
 
         if (full_safe <= poly_tol) && (fold_safe > max(poly_tol, 10 * full_safe))
             flags[:folding_degrades_accuracy] = true
-            push!(
-                  conclusions,
-                  "Folding degrades safe-interior accuracy relative to the full-grid operator. Inspect pairing and extension maps."
-                 )
+            push!(conclusions,
+                  "Folding degrades safe-interior accuracy relative to the full-grid operator. Inspect pairing and extension maps.")
         else
             flags[:folding_degrades_accuracy] = false
         end
 
-        if fold_safe <= poly_tol && diag.polynomial.gradient.global_max > 50 * max(poly_tol, fold_safe)
+        if fold_safe <= poly_tol &&
+           diag.polynomial.gradient.global_max > 50 * max(poly_tol, fold_safe)
             flags[:boundary_closure_dominated] = true
-            push!(
-                  conclusions,
-                  "Gradient errors are boundary-closure dominated. Increase closure exclusion when quoting interior accuracy."
-                 )
+            push!(conclusions,
+                  "Gradient errors are boundary-closure dominated. Increase closure exclusion when quoting interior accuracy.")
         else
             flags[:boundary_closure_dominated] = false
         end
@@ -248,21 +236,21 @@ function interpret_diagnostics(diag; tol::Float64 = 1e-10, poly_tol::Float64 = 1
         div_worst = diag.polynomial.divergence.worst_entry
         if div_worst !== nothing
             origin_dom = (div_worst.argmax_index == 1) ||
-                         (div_worst.near_origin_max_error > 10 * max(poly_tol, div_worst.mid_max_error, div_worst.near_boundary_max_error))
-            boundary_dom = div_worst.near_boundary_max_error > 10 * max(poly_tol, div_worst.mid_max_error, div_worst.near_origin_max_error)
+                         (div_worst.near_origin_max_error >
+                          10 * max(poly_tol, div_worst.mid_max_error,
+                              div_worst.near_boundary_max_error))
+            boundary_dom = div_worst.near_boundary_max_error >
+                           10 * max(poly_tol, div_worst.mid_max_error,
+                               div_worst.near_origin_max_error)
 
             flags[:divergence_origin_dominated] = origin_dom
             flags[:divergence_boundary_dominated] = boundary_dom
             if origin_dom
-                push!(
-                      conclusions,
-                      "Divergence error is origin-dominated; verify `(Du)(0)=(p+1)u'(0)`, parity of test input, and `Godd` origin row."
-                     )
+                push!(conclusions,
+                      "Divergence error is origin-dominated; verify `(Du)(0)=(p+1)u'(0)`, parity of test input, and `Godd` origin row.")
             elseif boundary_dom
-                push!(
-                      conclusions,
-                      "Divergence error is far-boundary dominated, consistent with closure effects near r=R."
-                     )
+                push!(conclusions,
+                      "Divergence error is far-boundary dominated, consistent with closure effects near r=R.")
             end
         else
             flags[:divergence_origin_dominated] = false
@@ -277,10 +265,8 @@ function interpret_diagnostics(diag; tol::Float64 = 1e-10, poly_tol::Float64 = 1
     end
 
     if isempty(conclusions)
-        push!(
-              conclusions,
-              "No structural inconsistency detected; observed errors are consistent with expected SBP closure/operator-family behavior."
-             )
+        push!(conclusions,
+              "No structural inconsistency detected; observed errors are consistent with expected SBP closure/operator-family behavior.")
     end
 
     return (conclusions = conclusions, flags = flags)
@@ -313,19 +299,17 @@ function diagnose(ops::SphericalOperators,
         report = validate(ops; verbose = false)
     end
 
-    atol_diag = tol === nothing ? max(1e-12, abs(_tofloat(ops.atol))) : _tofloat(tol)
-    maxdeg = hasproperty(report, :diagnostics) && hasproperty(report.diagnostics, :max_monomial_degree) ?
+    atol_diag = tol === nothing ? max(1.0e-12, abs(_tofloat(ops.atol))) : _tofloat(tol)
+    maxdeg = hasproperty(report, :diagnostics) &&
+             hasproperty(report.diagnostics, :max_monomial_degree) ?
              Int(report.diagnostics.max_monomial_degree) : ops.accuracy_order
 
     Nhalf = ops.Nh - 1
-    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(
-                                                          ops.source;
+    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(ops.source;
                                                           accuracy_order = ops.accuracy_order,
                                                           N = Nhalf,
                                                           R = ops.R,
-                                                          mode = ops.mode,
-                                                          build_matrix = ops.build_matrix
-                                                         )
+                                                          mode = ops.mode)
 
     atolT = _resolve_atol(eltype(xfull), ops.atol)
     r_fold, Rop, Eeven, Eodd = _build_folding_operators(xfull; atol = atolT)
@@ -353,8 +337,7 @@ function diagnose(ops::SphericalOperators,
     rend_ok = rend_error <= atol_diag
     grid_ok = symmetry_ok && uniform_ok && r0_ok && rend_ok
 
-    grid_diag = (
-                 M = M,
+    grid_diag = (M = M,
                  Nh = Nh,
                  xfirst = xfullf[1],
                  xlast = xfullf[end],
@@ -373,8 +356,7 @@ function diagnose(ops::SphericalOperators,
                  rend_ok = rend_ok,
                  r_match_error = r_match_error,
                  grid_ok = grid_ok,
-                 atol_used = atol_diag
-                )
+                 atol_used = atol_diag)
 
     # Folding map sanity
     row_counts = zeros(Int, Nh)
@@ -421,14 +403,10 @@ function diagnose(ops::SphericalOperators,
         f_full_exact = xfull .^ k
         f_full_even = Eeven * f_half
         err_even_vs_xk = _maxabs_float(f_full_even .- f_full_exact)
-        push!(
-              even_extension,
-              (
-               degree = k,
+        push!(even_extension,
+              (degree = k,
                expected_match_xk = iseven(k),
-               max_error_vs_xk = err_even_vs_xk
-              )
-             )
+               max_error_vs_xk = err_even_vs_xk))
         if iseven(k)
             push!(even_even_errs, err_even_vs_xk)
         end
@@ -443,15 +421,11 @@ function diagnose(ops::SphericalOperators,
         end
         err_odd_vs_signed = _maxabs_float(g_full_odd .- signed_abs)
         err_odd_vs_xk = _maxabs_float(g_full_odd .- f_full_exact)
-        push!(
-              odd_extension,
-              (
-               degree = k,
+        push!(odd_extension,
+              (degree = k,
                expected_match_xk = isodd(k),
                max_error_vs_xk = err_odd_vs_xk,
-               max_error_vs_signabs = err_odd_vs_signed
-              )
-             )
+               max_error_vs_signabs = err_odd_vs_signed))
         push!(odd_signed_errs, err_odd_vs_signed)
         if isodd(k)
             push!(odd_xk_odd_errs, err_odd_vs_xk)
@@ -460,22 +434,21 @@ function diagnose(ops::SphericalOperators,
 
     even_even_ok = isempty(even_even_errs) ? true : maximum(even_even_errs) <= atol_diag
     odd_signed_ok = isempty(odd_signed_errs) ? true : maximum(odd_signed_errs) <= atol_diag
-    odd_matches_xk_for_odd_k_ok = isempty(odd_xk_odd_errs) ? true : maximum(odd_xk_odd_errs) <= atol_diag
+    odd_matches_xk_for_odd_k_ok = isempty(odd_xk_odd_errs) ? true :
+                                  maximum(odd_xk_odd_errs) <= atol_diag
 
-    folding_diag = (
-                   rop_ok = rop_ok,
-                   rop_one_nonzero_per_row = one_per_row,
-                   rop_values_ok = value_ok,
-                   rop_index_match = index_match,
-                   rop_nonnegative_ok = nonnegative_ok,
-                   rop_coordinate_match_ok = coord_ok,
-                   rop_coordinate_match_max = coord_match_max,
-                   even_extension = even_extension,
-                   odd_extension = odd_extension,
-                   even_even_ok = even_even_ok,
-                   odd_signed_ok = odd_signed_ok,
-                   odd_matches_xk_for_odd_k_ok = odd_matches_xk_for_odd_k_ok
-                  )
+    folding_diag = (rop_ok = rop_ok,
+                    rop_one_nonzero_per_row = one_per_row,
+                    rop_values_ok = value_ok,
+                    rop_index_match = index_match,
+                    rop_nonnegative_ok = nonnegative_ok,
+                    rop_coordinate_match_ok = coord_ok,
+                    rop_coordinate_match_max = coord_match_max,
+                    even_extension = even_extension,
+                    odd_extension = odd_extension,
+                    even_even_ok = even_even_ok,
+                    odd_signed_ok = odd_signed_ok,
+                    odd_matches_xk_for_odd_k_ok = odd_matches_xk_for_odd_k_ok)
 
     # Operator consistency checks
     Gfold_even_direct = sparse(Rop * Gfull * Eeven)
@@ -517,22 +490,22 @@ function diagnose(ops::SphericalOperators,
         push!(vector_mass_ratio_errors, abs(inferred - Hcart_diag[i]))
     end
 
-    scalar_mass_diag_ratio_max = isempty(scalar_mass_ratio_errors) ? 0.0 : maximum(scalar_mass_ratio_errors)
-    vector_mass_diag_ratio_max = isempty(vector_mass_ratio_errors) ? 0.0 : maximum(vector_mass_ratio_errors)
+    scalar_mass_diag_ratio_max = isempty(scalar_mass_ratio_errors) ? 0.0 :
+                                 maximum(scalar_mass_ratio_errors)
+    vector_mass_diag_ratio_max = isempty(vector_mass_ratio_errors) ? 0.0 :
+                                 maximum(vector_mass_ratio_errors)
 
-    operator_diag = (
-                    geven_diff_max = Geven_diff_max,
-                    geven_diff_max_all_rows = Geven_diff_max_all_rows,
-                    geven_repaired_rows = repaired_rows,
-                    godd_diff_max = Godd_diff_max,
-                    S_offdiag_max = Soffdiag_max,
-                    V_offdiag_max = Voffdiag_max,
-                    Scart_diag_ratio_max_error = scalar_mass_diag_ratio_max,
-                    Vcart_diag_ratio_max_error = vector_mass_diag_ratio_max,
-                    # Backward-compatible aliases where H corresponds to scalar mass S.
-                    H_offdiag_max = Soffdiag_max,
-                    Hcart_diag_ratio_max_error = scalar_mass_diag_ratio_max
-                   )
+    operator_diag = (geven_diff_max = Geven_diff_max,
+                     geven_diff_max_all_rows = Geven_diff_max_all_rows,
+                     geven_repaired_rows = repaired_rows,
+                     godd_diff_max = Godd_diff_max,
+                     S_offdiag_max = Soffdiag_max,
+                     V_offdiag_max = Voffdiag_max,
+                     Scart_diag_ratio_max_error = scalar_mass_diag_ratio_max,
+                     Vcart_diag_ratio_max_error = vector_mass_diag_ratio_max,
+                     # Backward-compatible aliases where H corresponds to scalar mass S.
+                     H_offdiag_max = Soffdiag_max,
+                     Hcart_diag_ratio_max_error = scalar_mass_diag_ratio_max)
 
     # Closure diagnostics
     closure_info = _closure_diagnostics(ops.Geven)
@@ -549,8 +522,7 @@ function diagnose(ops::SphericalOperators,
     for i in idx_safe
         safe_mask[i] = true
     end
-    closure_diag = (
-                    row_nnz = closure_info.row_nnz,
+    closure_diag = (row_nnz = closure_info.row_nnz,
                     interior_mode = closure_info.interior_mode,
                     closure_width_left = safe_left,
                     closure_width_right = closure_right_used,
@@ -559,8 +531,7 @@ function diagnose(ops::SphericalOperators,
                     idx_safe = idx_safe,
                     safe_start = safe_start,
                     safe_end = safe_end,
-                    safe_count = length(idx_safe)
-                   )
+                    safe_count = length(idx_safe))
 
     idx_origin, idx_mid, idx_boundary = _region_indices(Nh, region_points)
 
@@ -593,11 +564,12 @@ function diagnose(ops::SphericalOperators,
         for deg in grad_degrees
             phi = ops.r .^ deg
             numerical = _tofloat_vec(ops.Geven * phi)
-            exact = deg == 0 ? zeros(Float64, Nh) : _tofloat_vec(convert(eltype(ops.r), deg) .* (ops.r .^ (deg - 1)))
+            exact = deg == 0 ? zeros(Float64, Nh) :
+                    _tofloat_vec(convert(eltype(ops.r), deg) .* (ops.r .^ (deg - 1)))
             err = abs.(numerical .- exact)
-            stats = _pointwise_error_summary(err, r, idx_safe, idx_origin, idx_mid, idx_boundary)
-            entry = (
-                     degree = deg,
+            stats = _pointwise_error_summary(err, r, idx_safe, idx_origin, idx_mid,
+                                             idx_boundary)
+            entry = (degree = deg,
                      numerical = numerical,
                      exact = exact,
                      error = err,
@@ -609,8 +581,7 @@ function diagnose(ops::SphericalOperators,
                      safe_argmax_r = stats.safe_argmax_r,
                      near_origin_max_error = stats.near_origin_max_error,
                      mid_max_error = stats.mid_max_error,
-                     near_boundary_max_error = stats.near_boundary_max_error
-                    )
+                     near_boundary_max_error = stats.near_boundary_max_error)
             push!(gradient_entries, entry)
             if entry.max_error > grad_global_max
                 grad_global_max = entry.max_error
@@ -627,11 +598,12 @@ function diagnose(ops::SphericalOperators,
         for deg in div_degrees
             u = ops.r .^ deg
             numerical = _tofloat_vec(ops.D * u)
-            exact = _tofloat_vec(convert(eltype(ops.r), ops.p + deg) .* (ops.r .^ (deg - 1)))
+            exact = _tofloat_vec(convert(eltype(ops.r), ops.p + deg) .*
+                                 (ops.r .^ (deg - 1)))
             err = abs.(numerical .- exact)
-            stats = _pointwise_error_summary(err, r, idx_safe, idx_origin, idx_mid, idx_boundary)
-            entry = (
-                     degree = deg,
+            stats = _pointwise_error_summary(err, r, idx_safe, idx_origin, idx_mid,
+                                             idx_boundary)
+            entry = (degree = deg,
                      numerical = numerical,
                      exact = exact,
                      error = err,
@@ -643,8 +615,7 @@ function diagnose(ops::SphericalOperators,
                      safe_argmax_r = stats.safe_argmax_r,
                      near_origin_max_error = stats.near_origin_max_error,
                      mid_max_error = stats.mid_max_error,
-                     near_boundary_max_error = stats.near_boundary_max_error
-                    )
+                     near_boundary_max_error = stats.near_boundary_max_error)
             push!(divergence_entries, entry)
             if entry.max_error > div_global_max
                 div_global_max = entry.max_error
@@ -669,31 +640,32 @@ function diagnose(ops::SphericalOperators,
             dphi_full_num = Gfull * phi_full_exact
             dphi_half_from_full = Rop * dphi_full_num
             dphi_half_folded = ops.Geven * phi_half
-            dphi_exact = deg == 0 ? fill(zero(eltype(ops.r)), Nh) : convert(eltype(ops.r), deg) .* (ops.r .^ (deg - 1))
+            dphi_exact = deg == 0 ? fill(zero(eltype(ops.r)), Nh) :
+                         convert(eltype(ops.r), deg) .* (ops.r .^ (deg - 1))
 
-            e_full_exact = abs.(_tofloat_vec(dphi_half_from_full) .- _tofloat_vec(dphi_exact))
+            e_full_exact = abs.(_tofloat_vec(dphi_half_from_full) .-
+                                _tofloat_vec(dphi_exact))
             e_fold_exact = abs.(_tofloat_vec(dphi_half_folded) .- _tofloat_vec(dphi_exact))
-            e_fold_full = abs.(_tofloat_vec(dphi_half_folded) .- _tofloat_vec(dphi_half_from_full))
+            e_fold_full = abs.(_tofloat_vec(dphi_half_folded) .-
+                               _tofloat_vec(dphi_half_from_full))
 
             safe_full = _safe_max_and_arg(e_full_exact, idx_safe).max_error
             safe_fold = _safe_max_and_arg(e_fold_exact, idx_safe).max_error
             safe_fold_full = _safe_max_and_arg(e_fold_full, idx_safe).max_error
 
-            push!(
-                  full_comp_entries,
-                  (
-                   degree = deg,
+            push!(full_comp_entries,
+                  (degree = deg,
                    max_full_vs_exact = _maxabs_float(e_full_exact),
                    max_full_vs_exact_safe = safe_full,
                    max_fold_vs_exact = _maxabs_float(e_fold_exact),
                    max_fold_vs_exact_safe = safe_fold,
                    max_fold_vs_full = _maxabs_float(e_fold_full),
-                   max_fold_vs_full_safe = safe_fold_full
-                  )
-                 )
+                   max_fold_vs_full_safe = safe_fold_full))
 
-            full_max_full_vs_exact = max(full_max_full_vs_exact, _maxabs_float(e_full_exact))
-            full_max_fold_vs_exact = max(full_max_fold_vs_exact, _maxabs_float(e_fold_exact))
+            full_max_full_vs_exact = max(full_max_full_vs_exact,
+                                         _maxabs_float(e_full_exact))
+            full_max_fold_vs_exact = max(full_max_fold_vs_exact,
+                                         _maxabs_float(e_fold_exact))
             full_max_fold_vs_full = max(full_max_fold_vs_full, _maxabs_float(e_fold_full))
             if !isnan(safe_full)
                 full_max_full_vs_exact_safe = max(full_max_full_vs_exact_safe, safe_full)
@@ -704,38 +676,28 @@ function diagnose(ops::SphericalOperators,
         end
     end
 
-    polynomial_diag = (
-                       skipped = polynomial_skipped,
+    polynomial_diag = (skipped = polynomial_skipped,
                        reason = polynomial_skipped ? "grid_not_symmetric_or_uniform" : "",
-                       regions = (
-                                  near_origin = idx_origin,
+                       regions = (near_origin = idx_origin,
                                   mid = idx_mid,
-                                  near_boundary = idx_boundary
-                                 ),
-                       gradient = (
-                                   entries = gradient_entries,
+                                  near_boundary = idx_boundary),
+                       gradient = (entries = gradient_entries,
                                    global_max = grad_global_max,
                                    global_safe_max = grad_safe_max,
                                    worst_entry = grad_worst_entry,
-                                   worst_table = grad_worst_table
-                                  ),
-                       divergence = (
-                                     entries = divergence_entries,
+                                   worst_table = grad_worst_table),
+                       divergence = (entries = divergence_entries,
                                      global_max = div_global_max,
                                      global_safe_max = div_safe_max,
                                      worst_entry = div_worst_entry,
-                                     worst_table = div_worst_table
-                                    )
-                      )
+                                     worst_table = div_worst_table))
 
-    fullgrid_diag = (
-                     entries = full_comp_entries,
+    fullgrid_diag = (entries = full_comp_entries,
                      max_full_vs_exact = full_max_full_vs_exact,
                      max_full_vs_exact_safe = full_max_full_vs_exact_safe,
                      max_fold_vs_exact = full_max_fold_vs_exact,
                      max_fold_vs_exact_safe = full_max_fold_vs_exact_safe,
-                     max_fold_vs_full = full_max_fold_vs_full
-                    )
+                     max_fold_vs_full = full_max_fold_vs_full)
 
     # SBP residual diagnostics
     Rsbp = sparse(ops.S * ops.D + transpose(ops.Geven) * ops.V - ops.B)
@@ -751,36 +713,30 @@ function diagnose(ops::SphericalOperators,
     sbp_safe = _maxabs_sparse_rows_float(Rsbp, mask_safe)
     largest_no_origin = _argmax_sparse_float(Rsbp; row_mask = mask_no_origin)
     largest_all = _argmax_sparse_float(Rsbp)
-    sbp_diag = (
-                max_no_origin = sbp_no_origin,
+    sbp_diag = (max_no_origin = sbp_no_origin,
                 max_safe_rows = sbp_safe,
-                largest_entry_no_origin = (
-                                           i = largest_no_origin.i,
+                largest_entry_no_origin = (i = largest_no_origin.i,
                                            j = largest_no_origin.j,
                                            value = largest_no_origin.value,
                                            abs_value = largest_no_origin.abs_value,
-                                           ri = largest_no_origin.i == 0 ? NaN : r[largest_no_origin.i],
-                                           rj = largest_no_origin.j == 0 ? NaN : r[largest_no_origin.j]
-                                          ),
-                largest_entry_all = (
-                                     i = largest_all.i,
+                                           ri = largest_no_origin.i == 0 ? NaN :
+                                                r[largest_no_origin.i],
+                                           rj = largest_no_origin.j == 0 ? NaN :
+                                                r[largest_no_origin.j]),
+                largest_entry_all = (i = largest_all.i,
                                      j = largest_all.j,
                                      value = largest_all.value,
                                      abs_value = largest_all.abs_value,
                                      ri = largest_all.i == 0 ? NaN : r[largest_all.i],
-                                     rj = largest_all.j == 0 ? NaN : r[largest_all.j]
-                                    )
-               )
+                                     rj = largest_all.j == 0 ? NaN : r[largest_all.j]))
 
-    base_diag = (
-                 grid = grid_diag,
+    base_diag = (grid = grid_diag,
                  folding = folding_diag,
                  operator_consistency = operator_diag,
                  closure = closure_diag,
                  polynomial = polynomial_diag,
                  fullgrid_comparison = fullgrid_diag,
-                 sbp = sbp_diag
-                )
+                 sbp = sbp_diag)
     interpretation = interpret_diagnostics(base_diag)
 
     diag = merge(base_diag, (interpretation = interpretation,))
@@ -796,10 +752,12 @@ function diagnose(ops::SphericalOperators,
             println("  Gradient error: global=$(diag.polynomial.gradient.global_max), safe=$(diag.polynomial.gradient.global_safe_max)")
             println("  Divergence error: global=$(diag.polynomial.divergence.global_max), safe=$(diag.polynomial.divergence.global_safe_max)")
             if diag.polynomial.gradient.worst_entry !== nothing
-                _print_table("  Gradient worst-case degree = $(diag.polynomial.gradient.worst_entry.degree)", diag.polynomial.gradient.worst_table)
+                _print_table("  Gradient worst-case degree = $(diag.polynomial.gradient.worst_entry.degree)",
+                             diag.polynomial.gradient.worst_table)
             end
             if diag.polynomial.divergence.worst_entry !== nothing
-                _print_table("  Divergence worst-case degree = $(diag.polynomial.divergence.worst_entry.degree)", diag.polynomial.divergence.worst_table)
+                _print_table("  Divergence worst-case degree = $(diag.polynomial.divergence.worst_entry.degree)",
+                             diag.polynomial.divergence.worst_table)
             end
         else
             println("  Polynomial diagnostics skipped: $(diag.polynomial.reason)")

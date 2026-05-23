@@ -3,14 +3,15 @@
 
 Default smooth initial scalar profile on `[0, R]` used by `solve_wave_ode`.
 """
-function default_wave_profile(r::AbstractVector; amplitude::Real = 1.0, center = nothing, width = nothing)
+function default_wave_profile(r::AbstractVector; amplitude::Real = 1.0, center = nothing,
+                              width = nothing)
     n = length(r)
     n == 0 && throw(ArgumentError("`r` must be non-empty."))
 
     rf = Float64.(r)
     R = rf[end]
     center_val = center === nothing ? 0.35 * R : Float64(center)
-    width_val = width === nothing ? max(1e-12, 0.08 * max(R, 1.0)) : Float64(width)
+    width_val = width === nothing ? max(1.0e-12, 0.08 * max(R, 1.0)) : Float64(width)
 
     return amplitude .* exp.(-((rf .- center_val) .^ 2) ./ (2 * width_val^2))
 end
@@ -244,19 +245,19 @@ function apply_characteristic_bc_sat!(dΠ::AbstractVector,
         return nothing
     end
 
-    T = promote_type(
-                     eltype(dΠ),
+    T = promote_type(eltype(dΠ),
                      eltype(dΞ),
                      eltype(Π),
                      eltype(Ξ),
-                     eltype(ops.r)
-                    )
+                     eltype(ops.r))
     twoT = convert(T, 2)
     BNN = convert(T, ops.B[end, end])
     SNN = convert(T, ops.S[end, end])
     VNN = convert(T, ops.V[end, end])
-    SNN == zero(T) && throw(ArgumentError("`S[end,end]` must be nonzero for SAT penalties on dΠ."))
-    VNN == zero(T) && throw(ArgumentError("`V[end,end]` must be nonzero for SAT penalties on dΞ."))
+    SNN == zero(T) &&
+        throw(ArgumentError("`S[end,end]` must be nonzero for SAT penalties on dΠ."))
+    VNN == zero(T) &&
+        throw(ArgumentError("`V[end,end]` must be nonzero for SAT penalties on dΞ."))
 
     invSN = one(T) / SNN
     invVN = one(T) / VNN
@@ -402,8 +403,7 @@ function check_wave_data_consistency(Π::AbstractVector,
     finite_ok = all(isfinite, Π) && all(isfinite, Ξ)
     consistent = finite_ok && origin_ok && (!require_boundary || boundary_ok)
 
-    return (
-            consistent = consistent,
+    return (consistent = consistent,
             finite_ok = finite_ok,
             origin_ok = origin_ok,
             boundary_ok = boundary_ok,
@@ -415,8 +415,7 @@ function check_wave_data_consistency(Π::AbstractVector,
             max_abs_xi = max_abs_xi,
             boundary_condition = bc_norm,
             enforce_origin = enforce_origin,
-            tol = tolT
-           )
+            tol = tolT)
 end
 
 """
@@ -467,7 +466,7 @@ function check_potential_consistency(ops::SphericalOperators,
     resid_l2_rel = resid_l2_abs / max(xi_l2, eps(Float64))
     resid_linf_rel = resid_linf_abs / max(xi_linf, eps(Float64))
 
-    tol_use = tol === nothing ? 1e-10 : Float64(tol)
+    tol_use = tol === nothing ? 1.0e-10 : Float64(tol)
     residual_ok = resid_l2_abs <= tol_use || resid_l2_rel <= tol_use
 
     GΠ = Vector{Float64}(ops.Geven * Πf)
@@ -481,11 +480,11 @@ function check_potential_consistency(ops::SphericalOperators,
 
     warnings = String[]
     if xi_near_zero && !pi_spatially_constant
-        push!(warnings, "This initial state is inconsistent with Ξ=φ_r for any scalar φ; you are evolving a general first-order system and may excite constraint-violating modes.")
+        push!(warnings,
+              "This initial state is inconsistent with Ξ=φ_r for any scalar φ; you are evolving a general first-order system and may excite constraint-violating modes.")
     end
 
-    return (
-            gauge = gauge,
+    return (gauge = gauge,
             phi_hat = ϕ̂,
             residual_l2_abs = resid_l2_abs,
             residual_l2_rel = resid_l2_rel,
@@ -501,8 +500,7 @@ function check_potential_consistency(ops::SphericalOperators,
             pi_spatially_constant = pi_spatially_constant,
             warnings = warnings,
             growth_explanation = "Ξ appears immediately if Π0 varies because Ξ_t = G Π.",
-            note = "Π can be prescribed independently as φ_t; Ξ_t = Geven*Π couples Π variations into Ξ immediately."
-           )
+            note = "Π can be prescribed independently as φ_t; Ξ_t = Geven*Π couples Π variations into Ξ immediately.")
 end
 
 """
@@ -534,20 +532,20 @@ function _sat_boundary_jacobian_entries(ops::SphericalOperators;
                                         bc::Symbol)
     bc_norm = _normalize_boundary_condition(bc)
     if bc_norm === :none
-        return (
-                apply = false,
+        return (apply = false,
                 dPi_dPi = 0.0,
                 dPi_dXi = 0.0,
                 dXi_dPi = 0.0,
-                dXi_dXi = 0.0
-               )
+                dXi_dXi = 0.0)
     end
 
     BNN = Float64(ops.B[end, end])
     SNN = Float64(ops.S[end, end])
     VNN = Float64(ops.V[end, end])
-    SNN == 0.0 && throw(ArgumentError("`S[end,end]` must be nonzero for SAT Jacobian terms on dΠ."))
-    VNN == 0.0 && throw(ArgumentError("`V[end,end]` must be nonzero for SAT Jacobian terms on dΞ."))
+    SNN == 0.0 &&
+        throw(ArgumentError("`S[end,end]` must be nonzero for SAT Jacobian terms on dΠ."))
+    VNN == 0.0 &&
+        throw(ArgumentError("`V[end,end]` must be nonzero for SAT Jacobian terms on dΞ."))
     invSN = 1.0 / SNN
     invVN = 1.0 / VNN
 
@@ -571,13 +569,11 @@ function _sat_boundary_jacobian_entries(ops::SphericalOperators;
         throw(ArgumentError("Unsupported boundary condition `$bc_norm`. Use :absorbing, :reflecting, :dirichlet, or :none."))
     end
 
-    return (
-            apply = true,
+    return (apply = true,
             dPi_dPi = dPi_dPi,
             dPi_dXi = dPi_dXi,
             dXi_dPi = dXi_dPi,
-            dXi_dXi = dXi_dXi
-           )
+            dXi_dXi = dXi_dXi)
 end
 
 """
@@ -594,7 +590,8 @@ end
 function WaveODEParams(ops::SphericalOperators{T, Ti};
                        boundary_condition::Symbol = :absorbing,
                        enforce_origin::Bool = true) where {T <: Real, Ti <: Integer}
-    return WaveODEParams{T, Ti}(ops, _normalize_boundary_condition(boundary_condition), enforce_origin)
+    return WaveODEParams{T, Ti}(ops, _normalize_boundary_condition(boundary_condition),
+                                enforce_origin)
 end
 
 """
@@ -615,7 +612,8 @@ function wave_system_ode!(dU::AbstractMatrix,
     size(U, 1) == n || throw(DimensionMismatch("`U` first dimension must be $(n)."))
     size(dU, 1) == n || throw(DimensionMismatch("`dU` first dimension must be $(n)."))
     size(U, 2) == 2 || throw(DimensionMismatch("`U` must have exactly 2 columns (Π, Ξ)."))
-    size(dU, 2) == 2 || throw(DimensionMismatch("`dU` must have exactly 2 columns (dΠ, dΞ)."))
+    size(dU, 2) == 2 ||
+        throw(DimensionMismatch("`dU` must have exactly 2 columns (dΠ, dΞ)."))
 
     Π = @view U[:, 1]
     Ξ = @view U[:, 2]

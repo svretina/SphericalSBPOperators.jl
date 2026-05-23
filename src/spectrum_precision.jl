@@ -1,9 +1,11 @@
 @inline _spectrum_as_big_rational(x::Rational{BigInt}) = x
 @inline _spectrum_as_big_rational(x::Integer) = big(x) // 1
-@inline _spectrum_as_big_rational(x::Rational{<:Integer}) = big(numerator(x)) // big(denominator(x))
+@inline _spectrum_as_big_rational(x::Rational{<:Integer}) = big(numerator(x)) //
+                                                            big(denominator(x))
 
 function _spectrum_as_big_rational(x::AbstractFloat)
-    isfinite(x) || throw(ArgumentError("Cannot convert non-finite floating-point value `$x` to Rational{BigInt}."))
+    isfinite(x) ||
+        throw(ArgumentError("Cannot convert non-finite floating-point value `$x` to Rational{BigInt}."))
     return rationalize(BigInt, BigFloat(x))
 end
 

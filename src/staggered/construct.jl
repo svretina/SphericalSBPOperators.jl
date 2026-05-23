@@ -164,7 +164,6 @@ function scale_spherical_operators(
         ops.mode,
         atol_scaled,
         ops.snap_factor,
-        ops.build_matrix,
         ops.M_full,
         ops.Nh
     )
@@ -185,7 +184,6 @@ function spherical_operators(
         mode = FastMode(),
         atol = nothing,
         snap_factor::Float64 = 64.0,
-        build_matrix::Symbol = :probe,
         custom_stencil_cols::Union{Nothing, Vector{Int}} = nothing,
         return_canonical::Bool = false,
         target_eltype::Union{Nothing, Type} = nothing
@@ -207,8 +205,7 @@ function spherical_operators(
         accuracy_order = Int(accuracy_order),
         N = Nint,
         R = R_canonical,
-        mode = mode,
-        build_matrix = build_matrix
+        mode = mode
     )
 
     T = eltype(xfull)
@@ -262,7 +259,6 @@ function spherical_operators(
         mode,
         atol_construct,
         snap_factor,
-        build_matrix,
         length(xfull),
         Nh
     )

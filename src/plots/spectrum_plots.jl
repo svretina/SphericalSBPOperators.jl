@@ -10,7 +10,8 @@ function laplacian_matrix(D::AbstractMatrix, G::AbstractMatrix; as_dense::Bool =
     nG1, nG2 = size(G)
     nD1 == nD2 || throw(DimensionMismatch("`D` must be square."))
     nG1 == nG2 || throw(DimensionMismatch("`G` must be square."))
-    nD2 == nG1 || throw(DimensionMismatch("`D` and `G` dimensions are incompatible for `D*G`."))
+    nD2 == nG1 ||
+        throw(DimensionMismatch("`D` and `G` dimensions are incompatible for `D*G`."))
 
     L = D * G
     return as_dense ? Matrix(L) : sparse(L)
@@ -19,7 +20,8 @@ end
 @inline _hasprop(x, s::Symbol) = hasproperty(x, s)
 @inline _default_spectrum_xscale() = identity
 
-function _spectrum_limits_with_padding(eigvals::AbstractVector{<:Complex}; pad_frac::Float64 = 0.08)
+function _spectrum_limits_with_padding(eigvals::AbstractVector{<:Complex};
+                                       pad_frac::Float64 = 0.08)
     x = real.(eigvals)
     y = imag.(eigvals)
     xmin, xmax = extrema(x)
@@ -30,16 +32,14 @@ function _spectrum_limits_with_padding(eigvals::AbstractVector{<:Complex}; pad_f
     xpad = pad_frac * dx
     ypad = pad_frac * dy
 
-    return (
-            xmin - xpad,
+    return (xmin - xpad,
             xmax + xpad,
             ymin - ypad,
-            ymax + ypad
-           )
+            ymax + ypad)
 end
 
 function _negative_x_limits(eigvals::AbstractVector{<:Complex};
-                            left_pad_frac::Float64 = 0.10,
+                            left_pad_frac::Float64 = 0.1,
                             right_pad_frac::Float64 = 0.03)
     x = real.(eigvals)
     xmin, xmax = extrema(x)
@@ -57,7 +57,8 @@ function _negative_x_limits(eigvals::AbstractVector{<:Complex};
 end
 
 function _extract_laplacian_factors(ops)
-    _hasprop(ops, :D) || throw(ArgumentError("Input must provide a divergence matrix field `D`."))
+    _hasprop(ops, :D) ||
+        throw(ArgumentError("Input must provide a divergence matrix field `D`."))
 
     D = getproperty(ops, :D)
     if _hasprop(ops, :Geven)
@@ -112,7 +113,7 @@ function save_laplacian_spectrum_plot(D::AbstractMatrix,
                                       tick_labelsize::Real = 18,
                                       title_size::Real = 30,
                                       draw_axes::Bool = true)
-    return _with_aps_theme() do
+    return _with_publication_theme() do
         eigvals = laplacian_spectrum(D, G)
         xlo, xhi, ylo, yhi = _spectrum_limits_with_padding(eigvals)
 
@@ -170,20 +171,20 @@ end
     save_laplacian_spectrum_sources_plot(sources, path; kwargs...)
 
 Build diagonal-mass spherical operators for each SBP `source` via
-`spherical_operators(...)`, compute `eig(D*Geven)`, and save an overlaid spectrum
+`diagonal_spherical_operators(...)`, compute `eig(D*Geven)`, and save an overlaid spectrum
 plot.
 
 This routine intentionally targets the diagonal-mass construction path.
 """
 function save_laplacian_spectrum_sources_plot(sources::AbstractVector,
                                               path::AbstractString;
-                                              labels::Union{Nothing, AbstractVector{<:AbstractString}} = nothing,
+                                              labels::Union{Nothing,
+                                                            AbstractVector{<:AbstractString}} = nothing,
                                               accuracy_order::Int = 6,
                                               N::Int = 64,
                                               R::Real = 1.0,
                                               p::Int = 2,
                                               mode = SafeMode(),
-                                              build_matrix::Symbol = :probe,
                                               markersize::Real = 8,
                                               xscale = _default_spectrum_xscale(),
                                               axis_labelsize::Real = 30,
@@ -192,7 +193,7 @@ function save_laplacian_spectrum_sources_plot(sources::AbstractVector,
                                               legend_labelsize::Real = 16,
                                               legend_position::Symbol = :lt,
                                               negative_x_only::Bool = true,
-                                              x_left_pad_frac::Float64 = 0.10,
+                                              x_left_pad_frac::Float64 = 0.1,
                                               x_right_pad_frac::Float64 = 0.03,
                                               draw_axes::Bool = true,
                                               title = L"\mathrm{Laplacian\ Spectrum\ Across\ SBP\ Sources}",
@@ -203,8 +204,7 @@ function save_laplacian_spectrum_sources_plot(sources::AbstractVector,
         throw(DimensionMismatch("`labels` length ($(length(labels))) must match `sources` length ($ns)."))
     end
 
-    palette = (
-               :dodgerblue,
+    palette = (:dodgerblue,
                :darkorange,
                :seagreen,
                :crimson,
@@ -213,10 +213,9 @@ function save_laplacian_spectrum_sources_plot(sources::AbstractVector,
                :goldenrod,
                :firebrick,
                :slateblue,
-               :olivedrab
-              )
+               :olivedrab)
 
-    return _with_aps_theme() do
+    return _with_publication_theme() do
         fig = Figure(size = (1200, 820), figure_padding = (24, 48, 28, 20))
         ax = Axis(fig[1, 1],
                   xlabel = L"\mathrm{Re}(\lambda)",
@@ -238,13 +237,12 @@ function save_laplacian_spectrum_sources_plot(sources::AbstractVector,
             color = (palette[mod1(k, length(palette))], 0.75)
 
             try
-                ops = spherical_operators(source;
+                ops = diagonal_spherical_operators(source;
                                           accuracy_order = accuracy_order,
                                           N = N,
                                           R = R,
                                           p = p,
-                                          mode = mode,
-                                          build_matrix = build_matrix)
+                                          mode = mode)
                 eigvals = laplacian_spectrum(ops)
                 scatter!(ax, real.(eigvals), imag.(eigvals);
                          markersize = markersize,
@@ -257,11 +255,13 @@ function save_laplacian_spectrum_sources_plot(sources::AbstractVector,
                     rethrow(err)
                 end
                 push!(failures, (; source, label, error = sprint(showerror, err)))
-                @warn("Skipping source while plotting Laplacian spectrum.", source = label, error = sprint(showerror, err))
+                @warn("Skipping source while plotting Laplacian spectrum.", source=label,
+                      error=sprint(showerror, err))
             end
         end
 
-        isempty(spectra) && throw(ArgumentError("No Laplacian spectra were plotted; all sources failed."))
+        isempty(spectra) &&
+            throw(ArgumentError("No Laplacian spectra were plotted; all sources failed."))
 
         if draw_axes
             vlines!(ax, [0.0]; linestyle = :dash, color = :black, linewidth = 2)

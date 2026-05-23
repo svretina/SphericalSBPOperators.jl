@@ -48,11 +48,14 @@ end
 
 function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
                               coeff_sensitive::Bool = true,
-                              tol_coeff::Union{Nothing, Float64} = nothing) where {T <: Real, Ti <: Integer}
+                              tol_coeff::Union{Nothing, Float64} = nothing) where {
+                                                                                   T <:
+                                                                                   Real,
+                                                                                   Ti <:
+                                                                                   Integer}
     n = size(G, 1)
     if n == 0
-        return (
-                row_nnz = Int[],
+        return (row_nnz = Int[],
                 interior_mode = 0,
                 reference_row = 1,
                 reference_pattern = Int[],
@@ -62,8 +65,7 @@ function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
                 closure_width_right = 0,
                 safe_start = 1,
                 safe_end = 0,
-                idx_safe = Int[]
-               )
+                idx_safe = Int[])
     end
 
     reference_row = clamp(fld(n, 2), 1, n)
@@ -72,32 +74,30 @@ function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
     row_nnz = [length(cols_by_row[i]) for i in 1:n]
     reference_pattern = patterns[reference_row]
 
-    ref_inf = isempty(vals_by_row[reference_row]) ? 0.0 : maximum(abs.(Float64.(vals_by_row[reference_row])))
-    tol_coeff_val = isnothing(tol_coeff) ? (1e3 * eps(Float64) * max(1.0, ref_inf)) : tol_coeff
+    ref_inf = isempty(vals_by_row[reference_row]) ? 0.0 :
+              maximum(abs.(Float64.(vals_by_row[reference_row])))
+    tol_coeff_val = isnothing(tol_coeff) ? (1.0e3 * eps(Float64) * max(1.0, ref_inf)) :
+                    tol_coeff
 
     left = 0
     for i in 1:n
-        _row_closure_flag(
-                          i,
+        _row_closure_flag(i,
                           patterns,
                           vals_by_row;
                           reference_row = reference_row,
                           coeff_sensitive = coeff_sensitive,
-                          tol_coeff = tol_coeff_val
-                         ) || break
+                          tol_coeff = tol_coeff_val) || break
         left += 1
     end
 
     right = 0
     for i in n:-1:1
-        _row_closure_flag(
-                          i,
+        _row_closure_flag(i,
                           patterns,
                           vals_by_row;
                           reference_row = reference_row,
                           coeff_sensitive = coeff_sensitive,
-                          tol_coeff = tol_coeff_val
-                         ) || break
+                          tol_coeff = tol_coeff_val) || break
         right += 1
     end
 
@@ -105,8 +105,7 @@ function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
     safe_end = n - right
     idx_safe = safe_start <= safe_end ? collect(safe_start:safe_end) : Int[]
 
-    return (
-            row_nnz = row_nnz,
+    return (row_nnz = row_nnz,
             interior_mode = length(reference_pattern),
             reference_row = reference_row,
             reference_pattern = reference_pattern,
@@ -116,8 +115,7 @@ function _closure_diagnostics(G::SparseMatrixCSC{T, Ti};
             closure_width_right = min(right, max(0, n - 1)),
             safe_start = safe_start,
             safe_end = safe_end,
-            idx_safe = idx_safe
-           )
+            idx_safe = idx_safe)
 end
 
 """
@@ -126,7 +124,8 @@ end
 Estimate right boundary closure width from row-pattern mismatch (and optional
 coefficient mismatch) relative to an interior reference row.
 """
-function _estimate_right_closure_width(G::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integer}
+function _estimate_right_closure_width(G::SparseMatrixCSC{T, Ti}) where {T <: Real,
+                                                                         Ti <: Integer}
     diag = _closure_diagnostics(G)
     return diag.closure_width_right
 end
@@ -137,7 +136,8 @@ function _maxabs_sparse(A::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integ
     return _maxabs(vals)
 end
 
-function _maxabs_sparse_no_origin(A::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <: Integer}
+function _maxabs_sparse_no_origin(A::SparseMatrixCSC{T, Ti}) where {T <: Real, Ti <:
+                                                                               Integer}
     I, _, V = findnz(A)
     m = zero(T)
     @inbounds for k in eachindex(V)
@@ -182,12 +182,10 @@ function _resolve_split_quadrature_orders(accuracy_order::Int, p::Int, maxdeg::I
 
     s_quad_order = max(0, _even_cap(legacy_quad_max))
     v_quad_order = legacy_quad_max >= 1 ? _odd_cap(legacy_quad_max) : -1
-    return (
-            quadrature_cap = quadrature_cap,
+    return (quadrature_cap = quadrature_cap,
             legacy_quad_max = legacy_quad_max,
             s_quad_order = s_quad_order,
-            v_quad_order = v_quad_order,
-           )
+            v_quad_order = v_quad_order)
 end
 
 """
@@ -224,7 +222,8 @@ function validate(ops::SphericalOperators;
         numerical = dot(u, ops.S * ones_h)
         exact = _integral_monomial(ops.R, q + ops.p)
         err = abs(numerical - exact)
-        push!(quadrature_scalar, (degree = q, numerical = numerical, exact = exact, abs_error = err))
+        push!(quadrature_scalar,
+              (degree = q, numerical = numerical, exact = exact, abs_error = err))
     end
 
     quadrature_vector = NamedTuple[]
@@ -233,7 +232,8 @@ function validate(ops::SphericalOperators;
         numerical = dot(u, ops.V * ones_h)
         exact = _integral_monomial(ops.R, q + ops.p)
         err = abs(numerical - exact)
-        push!(quadrature_vector, (degree = q, numerical = numerical, exact = exact, abs_error = err))
+        push!(quadrature_vector,
+              (degree = q, numerical = numerical, exact = exact, abs_error = err))
     end
 
     gradient_even = NamedTuple[]
@@ -242,16 +242,12 @@ function validate(ops::SphericalOperators;
         dphi_exact = deg == 0 ? fill(zero(T), Nh) : convert(T, deg) .* (ops.r .^ (deg - 1))
         dphi_num = ops.Geven * phi
         err = abs.(dphi_num .- dphi_exact)
-        push!(
-              gradient_even,
-              (
-               degree = deg,
+        push!(gradient_even,
+              (degree = deg,
                max_error = _maxabs(err),
                max_error_safe = _safe_max(err, idx_safe),
                interior_max_error = _safe_max(err, idx_safe),
-               max_error_near_boundary = _near_boundary_max(err, near_boundary_points)
-              )
-             )
+               max_error_near_boundary = _near_boundary_max(err, near_boundary_points)))
     end
 
     divergence_odd = NamedTuple[]
@@ -263,29 +259,22 @@ function validate(ops::SphericalOperators;
             div_exact = coeff .* (ops.r .^ (deg - 1))
             div_num = ops.D * u
             err = abs.(div_num .- div_exact)
-            push!(
-                  divergence_odd,
-                  (
-                   degree = deg,
+            push!(divergence_odd,
+                  (degree = deg,
                    max_error = _maxabs(err),
                    max_error_safe = _safe_max(err, idx_safe),
                    interior_max_error = _safe_max(err, idx_safe),
-                   max_error_near_boundary = _near_boundary_max(err, near_boundary_points)
-                  )
-                 )
+                   max_error_near_boundary = _near_boundary_max(err, near_boundary_points)))
         end
     end
 
     R_sbp = sparse(ops.S * ops.D + transpose(ops.Geven) * ops.V - ops.B)
-    sbp = (
-           sbp_full = _maxabs_sparse(R_sbp),
-           sbp_no_origin = _maxabs_sparse_no_origin(R_sbp)
-          )
+    sbp = (sbp_full = _maxabs_sparse(R_sbp),
+           sbp_no_origin = _maxabs_sparse_no_origin(R_sbp))
 
     r0 = ops.r[1]
     r0_ok = T <: AbstractFloat ? abs(r0) <= ops.atol : r0 == zero(T)
-    diagnostics = (
-                   M = ops.M_full,
+    diagnostics = (M = ops.M_full,
                    Nh = ops.Nh,
                    r0 = r0,
                    r0_ok = r0_ok,
@@ -304,47 +293,34 @@ function validate(ops::SphericalOperators;
                    quadrature_cap = quad_orders.quadrature_cap,
                    legacy_quad_max = quad_orders.legacy_quad_max,
                    s_quad_order = quad_orders.s_quad_order,
-                   v_quad_order = quad_orders.v_quad_order
-                  )
+                   v_quad_order = quad_orders.v_quad_order)
 
     quadrature = NamedTuple[]
     for row in quadrature_scalar
-        push!(
-              quadrature,
-              (
-               degree = row.degree,
+        push!(quadrature,
+              (degree = row.degree,
                numerical = row.numerical,
                exact = row.exact,
                abs_error = row.abs_error,
-               family = :scalar
-              )
-             )
+               family = :scalar))
     end
     for row in quadrature_vector
-        push!(
-              quadrature,
-              (
-               degree = row.degree,
+        push!(quadrature,
+              (degree = row.degree,
                numerical = row.numerical,
                exact = row.exact,
                abs_error = row.abs_error,
-               family = :vector
-              )
-             )
+               family = :vector))
     end
 
-    report = (
-              quadrature = quadrature,
-              quadrature_split = (
-                                  scalar = quadrature_scalar,
+    report = (quadrature = quadrature,
+              quadrature_split = (scalar = quadrature_scalar,
                                   vector = quadrature_vector,
-                                  settings = quad_orders
-                                 ),
+                                  settings = quad_orders),
               gradient_even = gradient_even,
               divergence_odd = divergence_odd,
               sbp = sbp,
-              diagnostics = diagnostics
-             )
+              diagnostics = diagnostics)
 
     if verbose
         println("Validation summary")
@@ -369,31 +345,27 @@ function validate(ops::SphericalOperators;
         println("\n  Gradient on even moments (phi=r^k):")
         println("    k    max_error               max_error_safe          max_error_near_boundary")
         for row in gradient_even
-            println(
-                    "    ",
+            println("    ",
                     lpad(row.degree, 2),
                     "    ",
                     lpad(string(row.max_error), 22),
                     "    ",
                     lpad(string(row.max_error_safe), 22),
                     "    ",
-                    lpad(string(row.max_error_near_boundary), 22)
-                   )
+                    lpad(string(row.max_error_near_boundary), 22))
         end
 
         println("\n  Divergence on odd moments (u=r^k):")
         println("    k    max_error               max_error_safe          max_error_near_boundary")
         for row in divergence_odd
-            println(
-                    "    ",
+            println("    ",
                     lpad(row.degree, 2),
                     "    ",
                     lpad(string(row.max_error), 22),
                     "    ",
                     lpad(string(row.max_error_safe), 22),
                     "    ",
-                    lpad(string(row.max_error_near_boundary), 22)
-                   )
+                    lpad(string(row.max_error_near_boundary), 22))
         end
     end
 

@@ -1,4 +1,5 @@
-function _extract_diagonal(H::SparseMatrixCSC{T, Ti}; atol::T) where {T <: Real, Ti <: Integer}
+function _extract_diagonal(H::SparseMatrixCSC{T, Ti};
+                           atol::T) where {T <: Real, Ti <: Integer}
     n, m = size(H)
     n == m || throw(DimensionMismatch("Mass matrix must be square."))
     diag_entries = fill(zero(T), n)
@@ -28,7 +29,6 @@ function _extract_diagonal(H::SparseMatrixCSC{T, Ti}; atol::T) where {T <: Real,
     end
     return diag_entries
 end
-
 
 function _set_divergence_rows!(D::SparseMatrixCSC{T, Ti},
                                RHS::SparseMatrixCSC{T, Ti},
@@ -79,13 +79,31 @@ end
     return v != zero(T)
 end
 
-function _rows_with_nonzero_first_column(G::SparseMatrixCSC{T, Ti}; atol::T) where {T <: Real, Ti <: Integer}
+function _rows_with_nonzero_first_column(G::SparseMatrixCSC{T, Ti};
+                                         atol::T) where {T <: Real, Ti <: Integer}
     n = size(G, 1)
     rows = Int[]
     @inbounds for i in 2:n
         _is_effective_nonzero(G[i, 1]; atol = atol) && push!(rows, i)
     end
     return rows
+end
+
+function _select_coupled_repair_rows(G::SparseMatrixCSC{T, Ti};
+                                     atol::T,
+                                     additional_rows::Int = 0) where {T <: Real,
+                                                                       Ti <: Integer}
+    additional_rows >= 0 ||
+        throw(ArgumentError("`additional_rows` must be non-negative."))
+
+    rows = _rows_with_nonzero_first_column(G; atol = atol)
+    additional_rows == 0 && return rows
+
+    Nh = size(G, 1)
+    base_end = isempty(rows) ? 1 : maximum(rows)
+    target_end = min(Nh, base_end + additional_rows)
+
+    return collect(2:target_end)
 end
 
 function _infer_interior_accuracy_order(Dfull)
@@ -107,8 +125,10 @@ function _cartesian_half_bandwidth(Dfull)
     hasproperty(coeffs, :lower_coef) || hasproperty(coeffs, :upper_coef) ||
         throw(ArgumentError("Could not infer bandwidth: coefficients expose neither `lower_coef` nor `upper_coef`."))
 
-    lower_bw = hasproperty(coeffs, :lower_coef) ? length(getproperty(coeffs, :lower_coef)) : 0
-    upper_bw = hasproperty(coeffs, :upper_coef) ? length(getproperty(coeffs, :upper_coef)) : 0
+    lower_bw = hasproperty(coeffs, :lower_coef) ? length(getproperty(coeffs, :lower_coef)) :
+               0
+    upper_bw = hasproperty(coeffs, :upper_coef) ? length(getproperty(coeffs, :upper_coef)) :
+               0
     bw = max(lower_bw, upper_bw)
     bw > 0 || throw(ArgumentError("Inferred non-positive Cartesian half-bandwidth: $bw."))
     return bw
@@ -156,12 +176,14 @@ function _infer_boundary_accuracy_order(Dfull,
         coeffs = getproperty(Dfull, :coefficients)
         if hasproperty(coeffs, :accuracy_order)
             q = Int(getproperty(coeffs, :accuracy_order))
-            q > 0 || throw(ArgumentError("Inferred non-positive interior accuracy order from coefficients: $q."))
+            q > 0 ||
+                throw(ArgumentError("Inferred non-positive interior accuracy order from coefficients: $q."))
             return max(0, fld(q, 2))
         end
     end
 
-    interior_accuracy > 0 || throw(ArgumentError("Failed to infer boundary accuracy from both probing and metadata."))
+    interior_accuracy > 0 ||
+        throw(ArgumentError("Failed to infer boundary accuracy from both probing and metadata."))
     return max(0, fld(interior_accuracy, 2))
 end
 
@@ -172,10 +194,12 @@ function _resolve_stencil_cols(custom_stencil_cols::Union{Nothing, Vector{Int}},
                                Nh::Int;
                                default_length::Int = num_constraints)
     default_length > 0 || throw(ArgumentError("`default_length` must be positive."))
-    stencil_cols = isnothing(custom_stencil_cols) ? collect(2:(1 + default_length)) : copy(custom_stencil_cols)
+    stencil_cols = isnothing(custom_stencil_cols) ? collect(2:(1 + default_length)) :
+                   copy(custom_stencil_cols)
 
     isempty(stencil_cols) && throw(ArgumentError("`stencil_cols` must be non-empty."))
-    1 in stencil_cols && throw(ArgumentError("`stencil_cols` must not include index 1 (the origin)."))
+    1 in stencil_cols &&
+        throw(ArgumentError("`stencil_cols` must not include index 1 (the origin)."))
     any(c -> c < 2 || c > Nh, stencil_cols) &&
         throw(ArgumentError("`stencil_cols` must lie in 2:$Nh."))
     length(unique(stencil_cols)) == length(stencil_cols) ||
@@ -199,7 +223,8 @@ function compute_even_gradient_row_decoupled(row_index::Int,
                                              stencil_indices::Vector{Int},
                                              num_constraints::Int)
     row_index >= 2 || throw(ArgumentError("`row_index` must satisfy row_index >= 2."))
-    1 in stencil_indices && throw(ArgumentError("`stencil_indices` must not include 1 (the origin)."))
+    1 in stencil_indices &&
+        throw(ArgumentError("`stencil_indices` must not include 1 (the origin)."))
 
     n_weights = length(stencil_indices)
     n_weights >= num_constraints ||
@@ -245,14 +270,16 @@ function verify_even_gradient_row_decoupled(row_index::Int,
     @inbounds for m in 0:(num_constraints - 1)
         power = 2 * m
         exact_deriv = m == 0 ? 0 // 1 : (power * r_i^(power - 1)) // 1
-        num_deriv = sum(weights[idx] * (big(j - 1)^power) for (idx, j) in enumerate(stencil_indices))
+        num_deriv = sum(weights[idx] * (big(j - 1)^power)
+                        for (idx, j) in enumerate(stencil_indices))
         exact_deriv == num_deriv || return false
     end
     return true
 end
 
 function _uniform_spacing(r::Vector{T}; atol::T) where {T <: AbstractFloat}
-    length(r) >= 2 || throw(ArgumentError("At least two grid points are required to infer spacing."))
+    length(r) >= 2 ||
+        throw(ArgumentError("At least two grid points are required to infer spacing."))
     Δr = r[2] - r[1]
     Δr > zero(T) || throw(ArgumentError("Grid spacing must be strictly positive."))
 
@@ -267,13 +294,15 @@ function _uniform_spacing(r::Vector{T}; atol::T) where {T <: AbstractFloat}
 end
 
 function _uniform_spacing(r::Vector{T}; atol::T) where {T <: Real}
-    length(r) >= 2 || throw(ArgumentError("At least two grid points are required to infer spacing."))
+    length(r) >= 2 ||
+        throw(ArgumentError("At least two grid points are required to infer spacing."))
     Δr = r[2] - r[1]
     Δr > zero(T) || throw(ArgumentError("Grid spacing must be strictly positive."))
 
     @inbounds for i in 3:length(r)
         δ = r[i] - r[i - 1]
-        δ == Δr || throw(ArgumentError("Non-uniform half-grid detected while inferring scaling."))
+        δ == Δr ||
+            throw(ArgumentError("Non-uniform half-grid detected while inferring scaling."))
     end
 
     return Δr
@@ -286,6 +315,12 @@ function _solve_exact_linear_system(A::Matrix{Rational{BigInt}},
     n_eq == 0 && return zeros(Rational{BigInt}, n_vars)
 
     M = hcat(copy(A), copy(b))
+    _, pivot_cols = _reduced_row_echelon!(M, n_vars)
+    return _extract_rref_solution(M, n_vars, pivot_cols)
+end
+
+function _reduced_row_echelon!(M::Matrix{Rational{BigInt}}, n_vars::Int)
+    n_eq = size(M, 1)
     pivot_cols = Int[]
     pivot_row = 1
 
@@ -318,6 +353,13 @@ function _solve_exact_linear_system(A::Matrix{Rational{BigInt}},
         pivot_row > n_eq && break
     end
 
+    return M, pivot_cols
+end
+
+function _extract_rref_solution(M::Matrix{Rational{BigInt}},
+                                n_vars::Int,
+                                pivot_cols::Vector{Int})
+    n_eq = size(M, 1)
     for r in 1:n_eq
         all_zero = true
         for c in 1:n_vars
@@ -338,8 +380,79 @@ function _solve_exact_linear_system(A::Matrix{Rational{BigInt}},
     return x
 end
 
+function _nullspace_basis_exact(A::Matrix{Rational{BigInt}})
+    n_eq, n_vars = size(A)
+    n_vars == 0 && return zeros(Rational{BigInt}, 0, 0)
+    if n_eq == 0
+        basis = zeros(Rational{BigInt}, n_vars, n_vars)
+        for i in 1:n_vars
+            basis[i, i] = 1 // 1
+        end
+        return basis
+    end
+
+    M = copy(A)
+    M, pivot_cols = _reduced_row_echelon!(M, n_vars)
+    pivot_set = Set(pivot_cols)
+    free_cols = [col for col in 1:n_vars if !(col in pivot_set)]
+    isempty(free_cols) && return zeros(Rational{BigInt}, n_vars, 0)
+
+    basis = zeros(Rational{BigInt}, n_vars, length(free_cols))
+    for (basis_idx, free_col) in enumerate(free_cols)
+        basis[free_col, basis_idx] = 1 // 1
+        for (row_idx, pivot_col) in enumerate(pivot_cols)
+            basis[pivot_col, basis_idx] = -M[row_idx, free_col]
+        end
+    end
+    return basis
+end
+
+function _exact_rank(A::Matrix{Rational{BigInt}})
+    n_eq, n_vars = size(A)
+    (n_eq == 0 || n_vars == 0) && return 0
+    M = copy(A)
+    _, pivot_cols = _reduced_row_echelon!(M, n_vars)
+    return length(pivot_cols)
+end
+
+function _affected_divergence_rows_from_stencil(stencil_cols::Vector{Int})
+    return sort(copy(stencil_cols))
+end
+
+function _sbp_moment_compatibility_residuals(Sdiag::Vector{T},
+                                             Vdiag::Vector{T},
+                                             Bdiag::Vector{T},
+                                             r::Vector{T},
+                                             p::Int,
+                                             num_constraints::Int,
+                                             divergence_degrees::Vector{Int}) where {
+                                                                                     T <:
+                                                                                     Real
+                                                                                     }
+    residuals = NamedTuple[]
+    @inbounds for m in 0:(num_constraints - 1)
+        even_degree = 2 * m
+        e = r .^ even_degree
+        eprime = m == 0 ? fill(zero(T), length(r)) :
+                 convert(T, even_degree) .* (r .^ (even_degree - 1))
+        for odd_degree in divergence_degrees
+            o = r .^ odd_degree
+            d_exact = convert(T, p + odd_degree) .* (r .^ (odd_degree - 1))
+            residual = dot(e, Sdiag .* d_exact) + dot(eprime, Vdiag .* o) - dot(e, Bdiag .* o)
+            push!(residuals,
+                  (even_degree = even_degree,
+                   odd_degree = odd_degree,
+                   residual = residual))
+        end
+    end
+    return residuals
+end
+
 function _divergence_constraint_degrees(interior_accuracy::Int, p::Int)
-    max_odd_degree = interior_accuracy - p
+    # Match the divergence constraints to the full interior accuracy target.
+    # We keep `p` in the signature because the repair API threads it through,
+    # but the requested odd-monomial ladder no longer depends on `p`.
+    max_odd_degree = interior_accuracy
     max_odd_degree >= 1 || return Int[]
     return collect(1:2:max_odd_degree)
 end
@@ -387,16 +500,16 @@ function _verify_coupled_origin_repair(Geven::SparseMatrixCSC{T, Ti},
     return true
 end
 
-function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
-                                    rows_to_solve::Vector{Int},
-                                    stencil_cols::Vector{Int},
-                                    num_constraints::Int,
-                                    divergence_degrees::Vector{Int},
-                                    r::Vector{T},
-                                    Sdiag::Vector{T},
-                                    Vdiag::Vector{T},
-                                    Bdiag::Vector{T},
-                                    p::Int) where {T <: Real, Ti <: Integer}
+function _assemble_coupled_geven_system(Geven::SparseMatrixCSC{T, Ti},
+                                        rows_to_solve::Vector{Int},
+                                        stencil_cols::Vector{Int},
+                                        num_constraints::Int,
+                                        divergence_degrees::Vector{Int},
+                                        r::Vector{T},
+                                        Sdiag::Vector{T},
+                                        Vdiag::Vector{T},
+                                        Bdiag::Vector{T},
+                                        p::Int) where {T <: Real, Ti <: Integer}
     row_count = length(rows_to_solve)
     row_set = Set(rows_to_solve)
     stencil_set = Set(stencil_cols)
@@ -426,7 +539,9 @@ function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
     @inbounds for row in rows_to_solve
         for m in 0:(num_constraints - 1)
             power = 2 * m
-            target = m == 0 ? 0 // 1 : convert(Rational{BigInt}, power) * convert(Rational{BigInt}, r[row]^(power - 1))
+            target = m == 0 ? 0 // 1 :
+                     convert(Rational{BigInt}, power) *
+                     convert(Rational{BigInt}, r[row]^(power - 1))
 
             fixed = 0 // 1
             for col in 1:Nh
@@ -446,12 +561,15 @@ function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
     # Divergence constraints on near-origin rows (odd monomials), expressed via G^T V.
     @inbounds for i in rows_to_solve
         hi = convert(Rational{BigInt}, Sdiag[i])
-        hi != 0 // 1 || throw(ArgumentError("Encountered zero scalar-mass diagonal at i=$i in coupled divergence constraints."))
+        hi != 0 // 1 ||
+            throw(ArgumentError("Encountered zero scalar-mass diagonal at i=$i in coupled divergence constraints."))
 
         for degree in divergence_degrees
-            exact = convert(Rational{BigInt}, p + degree) * convert(Rational{BigInt}, r[i]^(degree - 1))
+            exact = convert(Rational{BigInt}, p + degree) *
+                    convert(Rational{BigInt}, r[i]^(degree - 1))
 
-            fixed_numer = convert(Rational{BigInt}, Bdiag[i]) * convert(Rational{BigInt}, r[i]^degree)
+            fixed_numer = convert(Rational{BigInt}, Bdiag[i]) *
+                          convert(Rational{BigInt}, r[i]^degree)
             for j in 1:Nh
                 if (j in row_set) && (i in stencil_set)
                     continue
@@ -470,8 +588,258 @@ function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
         end
     end
 
+    return A, b, var_index, n_equations, n_unknowns
+end
+
+function _solve_coupled_geven_block(Geven::SparseMatrixCSC{T, Ti},
+                                    rows_to_solve::Vector{Int},
+                                    stencil_cols::Vector{Int},
+                                    num_constraints::Int,
+                                    divergence_degrees::Vector{Int},
+                                    r::Vector{T},
+                                    Sdiag::Vector{T},
+                                    Vdiag::Vector{T},
+                                    Bdiag::Vector{T},
+                                    p::Int) where {T <: Real, Ti <: Integer}
+    A, b, var_index, n_equations, n_unknowns = _assemble_coupled_geven_system(Geven,
+                                                                               rows_to_solve,
+                                                                               stencil_cols,
+                                                                               num_constraints,
+                                                                               divergence_degrees,
+                                                                               r,
+                                                                               Sdiag,
+                                                                               Vdiag,
+                                                                               Bdiag,
+                                                                               p)
     x = _solve_exact_linear_system(A, b)
     return x, var_index, n_equations, n_unknowns
+end
+
+function _build_downstream_divergence_objective(Geven::SparseMatrixCSC{T, Ti},
+                                                rows_to_solve::Vector{Int},
+                                                stencil_cols::Vector{Int},
+                                                divergence_degrees::Vector{Int},
+                                                r::Vector{T},
+                                                Sdiag::Vector{T},
+                                                Vdiag::Vector{T},
+                                                Bdiag::Vector{T},
+                                                p::Int,
+                                                var_index::Dict{Tuple{Int, Int}, Int};
+                                                target_rows::Union{Nothing, Vector{Int}} = nothing) where {
+                                                                                               T <:
+                                                                                               Real,
+                                                                                               Ti <:
+                                                                                               Integer
+                                                                                               }
+    target_rows = isnothing(target_rows) ? [i for i in _affected_divergence_rows_from_stencil(stencil_cols)
+                                            if i > maximum(rows_to_solve)] :
+                  copy(target_rows)
+    isempty(target_rows) && return zeros(Rational{BigInt}, 0, length(var_index)),
+                              Rational{BigInt}[],
+                              target_rows
+
+    row_set = Set(rows_to_solve)
+    stencil_set = Set(stencil_cols)
+    Nh = length(r)
+    n_rows = length(target_rows) * length(divergence_degrees)
+    n_vars = length(var_index)
+    C = zeros(Rational{BigInt}, n_rows, n_vars)
+    d = zeros(Rational{BigInt}, n_rows)
+
+    eq = 1
+    @inbounds for i in target_rows
+        hi = convert(Rational{BigInt}, Sdiag[i])
+        hi != 0 // 1 ||
+            throw(ArgumentError("Encountered zero scalar-mass diagonal at i=$i in downstream objective."))
+
+        for degree in divergence_degrees
+            exact = convert(Rational{BigInt}, p + degree) *
+                    convert(Rational{BigInt}, r[i]^(degree - 1))
+
+            fixed_numer = convert(Rational{BigInt}, Bdiag[i]) *
+                          convert(Rational{BigInt}, r[i]^degree)
+            for j in 1:Nh
+                if (j in row_set) && (i in stencil_set)
+                    continue
+                end
+                fixed_numer -= convert(Rational{BigInt}, Geven[j, i]) *
+                               convert(Rational{BigInt}, Vdiag[j]) *
+                               convert(Rational{BigInt}, r[j]^degree)
+            end
+
+            d[eq] = fixed_numer - hi * exact
+            if i in stencil_set
+                for j in rows_to_solve
+                    C[eq, var_index[(j, i)]] = convert(Rational{BigInt}, Vdiag[j]) *
+                                               convert(Rational{BigInt}, r[j]^degree)
+                end
+            end
+            eq += 1
+        end
+    end
+
+    return C, d, target_rows
+end
+
+function _score_exact_residual(v::Vector{Rational{BigInt}})
+    isempty(v) && return big(0.0)
+    score = big(0.0)
+    @inbounds for value in v
+        av = abs(BigFloat(value.num) / BigFloat(value.den))
+        if av > score
+            score = av
+        end
+    end
+    return score
+end
+
+function _for_each_k_subset(values::Vector{Int},
+                            k::Int,
+                            f::Function)
+    k == 0 && return f(Int[])
+    length(values) >= k || return nothing
+
+    chosen = Vector{Int}(undef, k)
+    function recurse(start_idx::Int, depth::Int)
+        remaining = k - depth + 1
+        last_start = length(values) - remaining + 1
+        for idx in start_idx:last_start
+            chosen[depth] = values[idx]
+            if depth == k
+                f(copy(chosen))
+            else
+                recurse(idx + 1, depth + 1)
+            end
+        end
+        return nothing
+    end
+
+    recurse(1, 1)
+    return nothing
+end
+
+function _search_stencil_cols_for_downstream_divergence(Geven::SparseMatrixCSC{T, Ti},
+                                                        rows_to_solve::Vector{Int},
+                                                        stencil_len::Int,
+                                                        num_constraints::Int,
+                                                        divergence_degrees::Vector{Int},
+                                                        r::Vector{T},
+                                                        Sdiag::Vector{T},
+                                                        Vdiag::Vector{T},
+                                                        Bdiag::Vector{T},
+                                                        p::Int) where {T <: Real,
+                                                                       Ti <: Integer}
+    max_row = maximum(rows_to_solve)
+    required_cols = copy(rows_to_solve)
+    extra_count = stencil_len - length(required_cols)
+    extra_count > 0 || return nothing
+
+    search_stop = min(length(r), max_row + extra_count + 3)
+    extra_candidates = collect((max_row + 1):search_stop)
+    length(extra_candidates) >= extra_count || return nothing
+
+    target_rows = collect((max_row + 1):min(length(r), max_row + extra_count))
+    isempty(target_rows) && return nothing
+
+    best = nothing
+    _for_each_k_subset(extra_candidates, extra_count, extra_cols -> begin
+        stencil_try = vcat(required_cols, extra_cols)
+        try
+            A_try, b_try, map_try, n_eq_try, n_unk_try = _assemble_coupled_geven_system(Geven,
+                                                                                         rows_to_solve,
+                                                                                         stencil_try,
+                                                                                         num_constraints,
+                                                                                         divergence_degrees,
+                                                                                         r,
+                                                                                         Sdiag,
+                                                                                         Vdiag,
+                                                                                         Bdiag,
+                                                                                         p)
+            x_try = _solve_exact_linear_system(A_try, b_try)
+            C_try, d_try, _ = _build_downstream_divergence_objective(Geven,
+                                                                     rows_to_solve,
+                                                                     stencil_try,
+                                                                     divergence_degrees,
+                                                                     r,
+                                                                     Sdiag,
+                                                                     Vdiag,
+                                                                     Bdiag,
+                                                                     p,
+                                                                     map_try;
+                                                                     target_rows = target_rows)
+            residual_try = C_try * x_try - d_try
+            score_try = _score_exact_residual(residual_try)
+
+            if isnothing(best) || score_try < best.score
+                best = (stencil_cols = stencil_try,
+                        x = x_try,
+                        A = A_try,
+                        b = b_try,
+                        var_index = map_try,
+                        n_equations = n_eq_try,
+                        n_unknowns = n_unk_try,
+                        target_rows = target_rows,
+                        score = score_try)
+            end
+        catch err
+            if err isa ArgumentError &&
+               occursin("no exact solution exists", sprint(showerror, err))
+                return nothing
+            end
+            rethrow()
+        end
+        return nothing
+    end)
+
+    return best
+end
+
+function _optimize_downstream_divergence_exact(Geven::SparseMatrixCSC{T, Ti},
+                                               rows_to_solve::Vector{Int},
+                                               stencil_cols::Vector{Int},
+                                               divergence_degrees::Vector{Int},
+                                               r::Vector{T},
+                                               Sdiag::Vector{T},
+                                               Vdiag::Vector{T},
+                                               Bdiag::Vector{T},
+                                               p::Int,
+                                               A::Matrix{Rational{BigInt}},
+                                               x::Vector{Rational{BigInt}},
+                                               var_index::Dict{Tuple{Int, Int}, Int}) where {
+                                                                                              T <:
+                                                                                              Real,
+                                                                                              Ti <:
+                                                                                              Integer
+                                                                                              }
+    N = _nullspace_basis_exact(A)
+    size(N, 2) == 0 && return x, Int[], false
+
+    C, d, target_rows = _build_downstream_divergence_objective(Geven,
+                                                               rows_to_solve,
+                                                               stencil_cols,
+                                                               divergence_degrees,
+                                                               r,
+                                                               Sdiag,
+                                                               Vdiag,
+                                                               Bdiag,
+                                                               p,
+                                                               var_index)
+    isempty(target_rows) && return x, target_rows, false
+
+    residual = C * x - d
+    all(iszero, residual) && return x, target_rows, false
+
+    M = C * N
+    try
+        α = _solve_exact_linear_system(M, -residual)
+        return x + N * α, target_rows, true
+    catch err
+        if err isa ArgumentError &&
+           occursin("no exact solution exists", sprint(showerror, err))
+            return x, target_rows, false
+        end
+        rethrow()
+    end
 end
 
 function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
@@ -484,13 +852,25 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                                              r::Vector{T};
                                              p::Int,
                                              atol::T,
-                                             custom_stencil_cols::Union{Nothing, Vector{Int}} = nothing) where {T <: Real, Ti <: Integer}
-    T <: Rational || throw(ArgumentError("Coupled origin repair requires exact rational arithmetic (`Rational{BigInt}` path)."))
+                                             additional_rows::Int = 0,
+                                             optimize_downstream_divergence::Bool = false,
+                                             custom_stencil_cols::Union{Nothing,
+                                                                        Vector{Int}} = nothing) where {
+                                                                                                       T <:
+                                                                                                       Real,
+                                                                                                       Ti <:
+                                                                                                       Integer
+                                                                                                       }
+    T <: Rational ||
+        throw(ArgumentError("Coupled origin repair requires exact rational arithmetic (`Rational{BigInt}` path)."))
 
-    rows_to_solve = _rows_with_nonzero_first_column(Geven; atol = atol)
+    rows_to_solve = _select_coupled_repair_rows(Geven;
+                                                atol = atol,
+                                                additional_rows = additional_rows)
     cartesian_half_bandwidth = _cartesian_half_bandwidth(Dfull)
     interior_accuracy = _infer_interior_accuracy_order(Dfull)
-    boundary_accuracy = _infer_boundary_accuracy_order(Dfull, Gfull, xfull, interior_accuracy; atol = atol)
+    boundary_accuracy = _infer_boundary_accuracy_order(Dfull, Gfull, xfull,
+                                                       interior_accuracy; atol = atol)
     num_constraints = _num_even_constraints(boundary_accuracy)
     requested_divergence_degrees = _divergence_constraint_degrees(interior_accuracy, p)
     divergence_degrees = copy(requested_divergence_degrees)
@@ -498,19 +878,19 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
 
     Nh = length(r)
     default_stencil_len = num_constraints + divergence_constraints
-    initial_stencil_len = min(default_stencil_len, Nh - 1)
-    stencil_cols = _resolve_stencil_cols(
-                                         custom_stencil_cols,
+    min_stencil_len = isempty(rows_to_solve) ? default_stencil_len : max(default_stencil_len,
+                                                                          maximum(rows_to_solve) - 1)
+    initial_stencil_len = min(min_stencil_len, Nh - 1)
+    stencil_cols = _resolve_stencil_cols(custom_stencil_cols,
                                          num_constraints,
                                          Nh;
-                                         default_length = initial_stencil_len
-                                        )
+                                         default_length = initial_stencil_len)
     Δr = _uniform_spacing(r; atol = atol)
 
     if isempty(rows_to_solve)
-        return (
-                rows_to_solve = rows_to_solve,
+        return (rows_to_solve = rows_to_solve,
                 divergence_rows = Int[],
+                affected_divergence_rows = Int[],
                 cartesian_half_bandwidth = cartesian_half_bandwidth,
                 interior_accuracy = interior_accuracy,
                 boundary_accuracy = boundary_accuracy,
@@ -521,14 +901,19 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                 stencil_cols = stencil_cols,
                 n_equations = 0,
                 n_unknowns = 0,
-                Δr = Δr
-               )
+                constraint_rank = 0,
+                augmented_constraint_rank = 0,
+                constraint_system_consistent = true,
+                sbp_moment_compatibility = NamedTuple[],
+                Δr = Δr)
     end
 
     var_index = Dict{Tuple{Int, Int}, Int}()
     x = Rational{BigInt}[]
     n_equations = 0
     n_unknowns = 0
+    A_system = zeros(Rational{BigInt}, 0, 0)
+    b_system = Rational{BigInt}[]
 
     if isnothing(custom_stencil_cols)
         solved = false
@@ -538,26 +923,25 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
             local_solved = false
 
             for len_try in start_len:(Nh - 1)
-                stencil_try = _resolve_stencil_cols(
-                                                   nothing,
-                                                   num_constraints,
-                                                   Nh;
-                                                   default_length = len_try
-                                                  )
+                stencil_try = _resolve_stencil_cols(nothing,
+                                                    num_constraints,
+                                                    Nh;
+                                                    default_length = len_try)
                 try
-                    x_try, map_try, n_eq_try, n_unk_try = _solve_coupled_geven_block(
-                                                                                      Geven,
-                                                                                      rows_to_solve,
-                                                                                      stencil_try,
-                                                                                      num_constraints,
-                                                                                      divergence_degrees,
-                                                                                      r,
-                                                                                      Sdiag,
-                                                                                      Vdiag,
-                                                                                      Bdiag,
-                                                                                      p
-                                                                                     )
+                    A_try, b_try, map_try, n_eq_try, n_unk_try = _assemble_coupled_geven_system(Geven,
+                                                                                                 rows_to_solve,
+                                                                                                 stencil_try,
+                                                                                                 num_constraints,
+                                                                                                 divergence_degrees,
+                                                                                                 r,
+                                                                                                 Sdiag,
+                                                                                                 Vdiag,
+                                                                                                 Bdiag,
+                                                                                                 p)
+                    x_try = _solve_exact_linear_system(A_try, b_try)
                     x = x_try
+                    A_system = A_try
+                    b_system = b_try
                     var_index = map_try
                     n_equations = n_eq_try
                     n_unknowns = n_unk_try
@@ -566,7 +950,8 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                     local_solved = true
                     break
                 catch err
-                    if err isa ArgumentError && occursin("no exact solution exists", sprint(showerror, err))
+                    if err isa ArgumentError &&
+                       occursin("no exact solution exists", sprint(showerror, err))
                         continue
                     end
                     rethrow()
@@ -579,27 +964,66 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
         end
 
         if !solved
-            throw(
-                  ArgumentError(
-                                "Could not find a consistent exact coupled solve up to stencil length $(Nh - 1) " *
-                                "for requested divergence degrees $(requested_divergence_degrees)."
-                               )
-                 )
+            throw(ArgumentError("Could not find a consistent exact coupled solve up to stencil length $(Nh - 1) " *
+                                "for requested divergence degrees $(requested_divergence_degrees)."))
         end
     else
         divergence_constraints = length(divergence_degrees)
-        x, var_index, n_equations, n_unknowns = _solve_coupled_geven_block(
-                                                                          Geven,
-                                                                          rows_to_solve,
-                                                                          stencil_cols,
-                                                                          num_constraints,
-                                                                          divergence_degrees,
-                                                                          r,
-                                                                          Sdiag,
-                                                                          Vdiag,
-                                                                          Bdiag,
-                                                                          p
-                                                                         )
+        A_system, b_system, var_index, n_equations, n_unknowns = _assemble_coupled_geven_system(Geven,
+                                                                                                 rows_to_solve,
+                                                                                                 stencil_cols,
+                                                                                                 num_constraints,
+                                                                                                 divergence_degrees,
+                                                                                                 r,
+                                                                                                 Sdiag,
+                                                                                                 Vdiag,
+                                                                                                 Bdiag,
+                                                                                                 p)
+        x = _solve_exact_linear_system(A_system, b_system)
+    end
+
+    optimized_target_rows = Int[]
+    downstream_optimized = false
+    if optimize_downstream_divergence
+        if isnothing(custom_stencil_cols)
+            search_result = _search_stencil_cols_for_downstream_divergence(Geven,
+                                                                           rows_to_solve,
+                                                                           length(stencil_cols),
+                                                                           num_constraints,
+                                                                           divergence_degrees,
+                                                                           r,
+                                                                           Sdiag,
+                                                                           Vdiag,
+                                                                           Bdiag,
+                                                                           p)
+            if !isnothing(search_result)
+                stencil_cols = search_result.stencil_cols
+                x = search_result.x
+                A_system = search_result.A
+                b_system = search_result.b
+                var_index = search_result.var_index
+                n_equations = search_result.n_equations
+                n_unknowns = search_result.n_unknowns
+                optimized_target_rows = search_result.target_rows
+                downstream_optimized = true
+            end
+        end
+
+        x_opt, opt_rows, opt_changed = _optimize_downstream_divergence_exact(Geven,
+                                                                             rows_to_solve,
+                                                                             stencil_cols,
+                                                                             divergence_degrees,
+                                                                             r,
+                                                                             Sdiag,
+                                                                             Vdiag,
+                                                                             Bdiag,
+                                                                             p,
+                                                                             A_system,
+                                                                             x,
+                                                                             var_index)
+        x = x_opt
+        isempty(opt_rows) || (optimized_target_rows = opt_rows)
+        downstream_optimized = downstream_optimized || opt_changed
     end
 
     @inbounds for row in rows_to_solve
@@ -611,8 +1035,7 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
 
     snap_sparse!(Geven)
 
-    _verify_coupled_origin_repair(
-                                  Geven,
+    _verify_coupled_origin_repair(Geven,
                                   rows_to_solve,
                                   num_constraints,
                                   divergence_degrees,
@@ -620,13 +1043,23 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
                                   Sdiag,
                                   Vdiag,
                                   Bdiag,
-                                  p
-                                 ) ||
+                                  p) ||
         throw(ArgumentError("Coupled row/column repair verification failed exactly."))
 
-    return (
-            rows_to_solve = rows_to_solve,
+    affected_divergence_rows = _affected_divergence_rows_from_stencil(stencil_cols)
+    constraint_rank = _exact_rank(A_system)
+    augmented_constraint_rank = _exact_rank(hcat(copy(A_system), copy(b_system)))
+    sbp_moment_compatibility = _sbp_moment_compatibility_residuals(Sdiag,
+                                                                   Vdiag,
+                                                                   Bdiag,
+                                                                   r,
+                                                                   p,
+                                                                   num_constraints,
+                                                                   divergence_degrees)
+
+    return (rows_to_solve = rows_to_solve,
             divergence_rows = copy(rows_to_solve),
+            affected_divergence_rows = affected_divergence_rows,
             cartesian_half_bandwidth = cartesian_half_bandwidth,
             interior_accuracy = interior_accuracy,
             boundary_accuracy = boundary_accuracy,
@@ -637,8 +1070,13 @@ function _repair_even_gradient_first_column!(Geven::SparseMatrixCSC{T, Ti},
             stencil_cols = stencil_cols,
             n_equations = n_equations,
             n_unknowns = n_unknowns,
-            Δr = Δr
-           )
+            constraint_rank = constraint_rank,
+            augmented_constraint_rank = augmented_constraint_rank,
+            constraint_system_consistent = (constraint_rank == augmented_constraint_rank),
+            sbp_moment_compatibility = sbp_moment_compatibility,
+            optimized_target_rows = optimized_target_rows,
+            downstream_optimized = downstream_optimized,
+            Δr = Δr)
 end
 
 function _assert_global_even_interior_accuracy(Geven::SparseMatrixCSC{T, Ti},
@@ -660,7 +1098,8 @@ function _assert_global_even_interior_accuracy(Geven::SparseMatrixCSC{T, Ti},
     start_idx <= stop_idx || return nothing
 
     if T <: AbstractFloat
-        err = maximum(abs.(view(dphi_num, start_idx:stop_idx) .- view(dphi_exact, start_idx:stop_idx)))
+        err = maximum(abs.(view(dphi_num, start_idx:stop_idx) .-
+                           view(dphi_exact, start_idx:stop_idx)))
         scale = max(one(T), maximum(abs.(view(dphi_exact, start_idx:stop_idx))))
         tol = max(atol, T(2048) * eps(T) * scale)
         err <= tol ||
@@ -691,7 +1130,8 @@ end
 function _scale_sparse_matrix(A::SparseMatrixCSC{Ta, Ti},
                               factor,
                               ::Type{Tb};
-                              snap_factor::Float64) where {Ta <: Real, Ti <: Integer, Tb <: Real}
+                              snap_factor::Float64) where {Ta <: Real, Ti <: Integer,
+                                                           Tb <: Real}
     n, m = size(A)
     I, J, V = findnz(A)
     f = convert(Tb, factor)
@@ -718,7 +1158,8 @@ function scale_spherical_operators(ops::SphericalOperators,
                                    R;
                                    target_eltype::Union{Nothing, Type} = nothing,
                                    atol = nothing)
-    ops.Nh >= 2 || throw(ArgumentError("At least two half-grid points are required for scaling."))
+    ops.Nh >= 2 ||
+        throw(ArgumentError("At least two half-grid points are required for scaling."))
 
     Tout = isnothing(target_eltype) ? _default_scale_eltype(R) : target_eltype
     Tout <: Real || throw(ArgumentError("`target_eltype` must be a subtype of `Real`."))
@@ -737,17 +1178,22 @@ function scale_spherical_operators(ops::SphericalOperators,
         r_scaled[i] = convert(Tout, ops.r[i]) * scale_ratio
     end
 
-    S_scaled = _scale_sparse_matrix(ops.S, scale_ratio^(ops.p + 1), Tout; snap_factor = ops.snap_factor)
-    V_scaled = _scale_sparse_matrix(ops.V, scale_ratio^(ops.p + 1), Tout; snap_factor = ops.snap_factor)
-    B_scaled = _scale_sparse_matrix(ops.B, scale_ratio^ops.p, Tout; snap_factor = ops.snap_factor)
-    Geven_scaled = _scale_sparse_matrix(ops.Geven, inv(scale_ratio), Tout; snap_factor = ops.snap_factor)
-    Godd_scaled = _scale_sparse_matrix(ops.Godd, inv(scale_ratio), Tout; snap_factor = ops.snap_factor)
-    D_scaled = _scale_sparse_matrix(ops.D, inv(scale_ratio), Tout; snap_factor = ops.snap_factor)
+    S_scaled = _scale_sparse_matrix(ops.S, scale_ratio^(ops.p + 1), Tout;
+                                    snap_factor = ops.snap_factor)
+    V_scaled = _scale_sparse_matrix(ops.V, scale_ratio^(ops.p + 1), Tout;
+                                    snap_factor = ops.snap_factor)
+    B_scaled = _scale_sparse_matrix(ops.B, scale_ratio^ops.p, Tout;
+                                    snap_factor = ops.snap_factor)
+    Geven_scaled = _scale_sparse_matrix(ops.Geven, inv(scale_ratio), Tout;
+                                        snap_factor = ops.snap_factor)
+    Godd_scaled = _scale_sparse_matrix(ops.Godd, inv(scale_ratio), Tout;
+                                       snap_factor = ops.snap_factor)
+    D_scaled = _scale_sparse_matrix(ops.D, inv(scale_ratio), Tout;
+                                    snap_factor = ops.snap_factor)
 
     atol_scaled = _resolve_atol(Tout, atol)
 
-    return SphericalOperators(
-                              r_scaled,
+    return SphericalOperators(r_scaled,
                               S_scaled,
                               V_scaled,
                               B_scaled,
@@ -762,19 +1208,17 @@ function scale_spherical_operators(ops::SphericalOperators,
                               ops.mode,
                               atol_scaled,
                               ops.snap_factor,
-                              ops.build_matrix,
                               ops.M_full,
-                              ops.Nh
-                             )
+                              ops.Nh)
 end
 
 """
-    spherical_operators(source; accuracy_order, N, R, p=2, mode=SafeMode(),
-                        atol=nothing, snap_factor=64.0, build_matrix=:probe,
-                        custom_stencil_cols=nothing, return_canonical=false,
-                        target_eltype=nothing, mass_solver=:seed,
-                        mass_solver_opts=(;), seed_banded=true,
-                        seed_band_scale=1//10^12)
+    diagonal_spherical_operators(source; accuracy_order, N, R, p=2, mode=SafeMode(),
+                                 atol=nothing, snap_factor=64.0,
+                                 custom_stencil_cols=nothing, return_canonical=false,
+                                 target_eltype=nothing, mass_solver=:seed,
+                                 mass_solver_opts=(;), seed_banded=true,
+                                 seed_band_scale=1//10^12)
 
 Construct folded spherical-symmetry SBP operators on `[0, R]` from a Cartesian first
 derivative operator on `[-R, R]`.
@@ -797,8 +1241,10 @@ function spherical_operators(source;
                              mode = SafeMode(),
                              atol = nothing,
                              snap_factor::Float64 = 64.0,
-                             build_matrix::Symbol = :probe,
                              custom_stencil_cols::Union{Nothing, Vector{Int}} = nothing,
+                             additional_repair_rows::Int = 0,
+                             optimize_downstream_divergence::Bool = false,
+                             return_repair_info::Bool = false,
                              return_canonical::Bool = false,
                              target_eltype::Union{Nothing, Type} = nothing,
                              mass_solver::Symbol = :seed,
@@ -806,19 +1252,18 @@ function spherical_operators(source;
                              seed_banded::Bool = true,
                              seed_band_scale::Real = 1 // 10^12)
     p >= 0 || throw(ArgumentError("`p` must satisfy p >= 0."))
+    additional_repair_rows >= 0 ||
+        throw(ArgumentError("`additional_repair_rows` must be non-negative."))
     Nint = Int(N)
     Nint > 0 || throw(ArgumentError("`N` must be positive."))
 
     # Canonical construction grid: spacing = 1, domain [-N, N].
     R_canonical = big(Nint) // 1
-    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(
-                                                           source;
-                                                           accuracy_order = Int(accuracy_order),
-                                                           N = Nint,
-                                                           R = R_canonical,
-                                                           mode = mode,
-                                                           build_matrix = build_matrix
-                                                          )
+    Dfull, xfull, Gfull, Hfull = _build_full_grid_objects(source;
+                                                          accuracy_order = Int(accuracy_order),
+                                                          N = Nint,
+                                                          R = R_canonical,
+                                                          mode = mode)
 
     T = eltype(xfull)
     atol_construct = _resolve_atol(T, nothing)
@@ -852,20 +1297,21 @@ function spherical_operators(source;
     do_gegeven_repair = true
     interior_accuracy = _infer_interior_accuracy_order(Dfull)
     rows_repaired = Int[]
+    repair_info = nothing
     if do_gegeven_repair
-        repair_info = _repair_even_gradient_first_column!(
-                                                           Geven,
-                                                           Dfull,
-                                                           Gfull,
-                                                           xfull,
-                                                           Sdiag,
-                                                           Vdiag,
-                                                           Bdiag,
-                                                           r;
-                                                           p = p,
-                                                           atol = atol_construct,
-                                                           custom_stencil_cols = custom_stencil_cols
-                                                          )
+        repair_info = _repair_even_gradient_first_column!(Geven,
+                                                          Dfull,
+                                                          Gfull,
+                                                          xfull,
+                                                          Sdiag,
+                                                          Vdiag,
+                                                          Bdiag,
+                                                          r;
+                                                          p = p,
+                                                          atol = atol_construct,
+                                                          additional_rows = additional_repair_rows,
+                                                          optimize_downstream_divergence = optimize_downstream_divergence,
+                                                          custom_stencil_cols = custom_stencil_cols)
         interior_accuracy = repair_info.interior_accuracy
         rows_repaired = repair_info.rows_to_solve
 
@@ -879,14 +1325,12 @@ function spherical_operators(source;
                     closure_pattern.closure_width_right :
                     Int(closure_from_operator)
 
-    _assert_global_even_interior_accuracy(
-                                          Geven,
+    _assert_global_even_interior_accuracy(Geven,
                                           r,
                                           interior_accuracy,
                                           rows_repaired,
                                           right_closure;
-                                          atol = atol_construct
-                                         )
+                                          atol = atol_construct)
 
     RHS = sparse(B - transpose(Geven) * V)
     D = spzeros(T, Nh, Nh)
@@ -898,8 +1342,7 @@ function spherical_operators(source;
                     closure_pattern.closure_width_right :
                     max(closure_pattern.closure_width_right, closure_from_operator)
 
-    ops_canonical = SphericalOperators(
-                                       r,
+    ops_canonical = SphericalOperators(r,
                                        S,
                                        V,
                                        B,
@@ -914,22 +1357,21 @@ function spherical_operators(source;
                                        mode,
                                        atol_construct,
                                        snap_factor,
-                                       build_matrix,
                                        length(xfull),
-                                       Nh
-                                      )
+                                       Nh)
 
-    return_canonical && return ops_canonical
+    if return_canonical
+        return return_repair_info ? (ops = ops_canonical, repair_info = repair_info) : ops_canonical
+    end
 
     Tout = isnothing(target_eltype) ? _default_scale_eltype(R) : target_eltype
     Tout <: Real || throw(ArgumentError("`target_eltype` must be a subtype of `Real`."))
 
-    return scale_spherical_operators(
-                                     ops_canonical,
-                                     R;
-                                     target_eltype = Tout,
-                                     atol = atol
-                                    )
+    ops_scaled = scale_spherical_operators(ops_canonical,
+                                           R;
+                                           target_eltype = Tout,
+                                           atol = atol)
+    return return_repair_info ? (ops = ops_scaled, repair_info = repair_info) : ops_scaled
 end
 
 @inline apply_even_gradient(ops::SphericalOperators, phi) = ops.Geven * phi
