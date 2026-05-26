@@ -1,6 +1,6 @@
 using InteractiveUtils: subtypes
 using GenericSchur
-using LinearAlgebra: schur
+using LinearAlgebra: I, schur
 using MultiFloats: Float64x4
 using Printf: @printf, @sprintf
 
@@ -260,6 +260,16 @@ function _build_banded_ops(source, order::Int; points::Int, R::Rational{BigInt},
     order in (4, 6) ||
         throw(ArgumentError("Unsupported banded order: $order"))
 
+    if order == 6
+        return SphericalSBPOperators.non_diagonal_exp_spherical_operators(source;
+                                                                          points = points,
+                                                                          R = R,
+                                                                          p = p,
+                                                                          mode = mode,
+                                                                          outer_boundary_closure_help = false,
+                                                                          verbose = false)
+    end
+
     return SphericalSBPOperators.non_diagonal_spherical_operators(source;
                                                                   accuracy_order = order,
                                                                   points = points,
@@ -269,19 +279,73 @@ function _build_banded_ops(source, order::Int; points::Int, R::Rational{BigInt},
                                                                   verbose = false)
 end
 
-function _assemble_hyperbolic_block(ops; bc::Symbol)
+@inline function _normalize_spectrum_boundary_model(boundary_model::Symbol)
+    boundary_model in (:sat, :hard) ||
+        throw(ArgumentError("Unsupported boundary model `$boundary_model`; use `:sat` or `:hard`."))
+    return boundary_model
+end
+
+@inline _boundary_model_tag(boundary_model::Symbol) =
+    String(_normalize_spectrum_boundary_model(boundary_model))
+
+@inline function _spectrum_bc_operator_kind(bc::Symbol)
+    bc === :reflecting && return :dirichlet
+    bc === :absorbing && return :absorbing
+    throw(ArgumentError("Unsupported spectrum boundary condition `$bc`; use `:reflecting` or `:absorbing`."))
+end
+
+function _hard_boundary_projection(ops; bc::Symbol, enforce_origin::Bool = false)
+    bc in (:reflecting, :absorbing) ||
+        throw(ArgumentError("Unsupported hard boundary condition `$bc`; use `:reflecting` or `:absorbing`."))
+    bc_kind = _spectrum_bc_operator_kind(bc)
+    n = length(ops.r)
+    P = Matrix{Float64}(I, 2 * n, 2 * n)
+
+    if enforce_origin && n >= 1
+        P[n + 1, :] .= 0.0
+    end
+
+    if bc_kind === :dirichlet
+        P[n, :] .= 0.0
+    elseif bc_kind === :absorbing
+        P[n, :] .= 0.0
+        P[n, 2 * n] = -1.0
+    else
+        P[2 * n, :] .= 0.0
+    end
+
+    return P
+end
+
+function _assemble_hyperbolic_block(ops; bc::Symbol, boundary_model::Symbol = :sat,
+                                    enforce_origin::Bool = false)
     bc in (:reflecting, :absorbing) ||
         throw(ArgumentError("Unsupported boundary condition `$bc`; use `:reflecting` or `:absorbing`."))
+    boundary_model = _normalize_spectrum_boundary_model(boundary_model)
+    bc_kind = _spectrum_bc_operator_kind(bc)
     n = length(ops.r)
+    if boundary_model === :sat
+        J = Matrix{Float64}(SphericalSBPOperators.wave_system_jac_prototype(ops;
+                                                                            boundary_condition = bc_kind))
+        SphericalSBPOperators.wave_system_jac!(J,
+                                               zeros(Float64, 2 * n),
+                                               SphericalSBPOperators.WaveODEParams(ops;
+                                                                                   boundary_condition = bc_kind,
+                                                                                   enforce_origin = enforce_origin),
+                                               0.0)
+        return J
+    end
+
     J = Matrix{Float64}(SphericalSBPOperators.wave_system_jac_prototype(ops;
-                                                                        boundary_condition = bc))
+                                                                        boundary_condition = :none))
     SphericalSBPOperators.wave_system_jac!(J,
                                            zeros(Float64, 2 * n),
                                            SphericalSBPOperators.WaveODEParams(ops;
-                                                                               boundary_condition = bc,
+                                                                               boundary_condition = :none,
                                                                                enforce_origin = false),
                                            0.0)
-    return J
+    P = _hard_boundary_projection(ops; bc = bc, enforce_origin = enforce_origin)
+    return P * J * P
 end
 
 @inline _fmt_sci(x::Real) = @sprintf("%.6e", Float64(x))
@@ -339,7 +403,8 @@ function _compute_order_rows(order::Int;
                              R::Rational{BigInt},
                              p::Int,
                              mode,
-                             tiny_zero_tol::Float64)
+                             tiny_zero_tol::Float64,
+                             boundary_model::Symbol = :sat)
     gathered = collect_sbp_sources()
     rows_hyper_ref = NamedTuple[]
     rows_hyper_rad = NamedTuple[]
@@ -355,8 +420,10 @@ function _compute_order_rows(order::Int;
         try
             ops = _build_banded_ops(src, order; points = points, R = R, p = p, mode = mode)
 
-            L_ref = _assemble_hyperbolic_block(ops; bc = :reflecting)
-            L_rad = _assemble_hyperbolic_block(ops; bc = :absorbing)
+            L_ref = _assemble_hyperbolic_block(ops; bc = :reflecting,
+                                               boundary_model = boundary_model)
+            L_rad = _assemble_hyperbolic_block(ops; bc = :absorbing,
+                                               boundary_model = boundary_model)
             L_lap = Matrix(ops.D * ops.Geven)
 
             metrics_ref = _spectral_metrics(_high_precision_schur_values(L_ref);

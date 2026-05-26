@@ -14,18 +14,22 @@ function _build_staggered_ops(source, order::Int;
                               R::Rational{BigInt},
                               p::Int,
                               mode)
-    ops = Staggered.spherical_operators(source;
-                                        accuracy_order = order,
-                                        N = points,
-                                        R = R,
-                                        p = p,
-                                        mode = mode)
-    return (r = ops.r,
-            D = ops.D,
-            Geven = ops.Geven,
-            H = ops.H,
-            B = ops.B,
-            source = source)
+    return Staggered.spherical_operators(source;
+                                         accuracy_order = order,
+                                         N = points,
+                                         R = R,
+                                         p = p,
+                                         mode = mode)
+end
+
+function _is_staggered_unsupported_source_error(err)
+    return err isa MethodError &&
+           (err.f === SummationByPartsOperators.first_derivative_coefficients ||
+            err.f === SummationByPartsOperators.derivative_operator ||
+            err.f === SummationByPartsOperators.mass_matrix ||
+            err.f === SummationByPartsOperators.grid) ||
+           (err isa ArgumentError &&
+            startswith(sprint(showerror, err), "ArgumentError: Non-uniform staggered half-grid detected."))
 end
 
 function _compute_order_rows_staggered(order::Int;
@@ -39,6 +43,7 @@ function _compute_order_rows_staggered(order::Int;
     rows_hyper_rad = NamedTuple[]
     rows_laplacian = NamedTuple[]
     failures = NamedTuple[]
+    skipped = copy(gathered.skipped)
 
     total = length(gathered.sources)
     ok = 0
@@ -70,6 +75,13 @@ function _compute_order_rows_staggered(order::Int;
             ok += 1
             @printf("[staggered order=%d] [%d/%d] OK   %s\n", order, idx, total, label)
         catch err
+            if _is_staggered_unsupported_source_error(err)
+                reason = sprint(showerror, err)
+                push!(skipped, (; type = string(typeof(src)), reason = reason))
+                @printf("[staggered order=%d] [%d/%d] SKIP %s :: %s\n", order, idx, total,
+                        label, reason)
+                continue
+            end
             msg = sprint(showerror, err)
             push!(failures, (; label = label, error = msg))
             @printf("[staggered order=%d] [%d/%d] FAIL %s :: %s\n", order, idx, total,
@@ -84,7 +96,7 @@ function _compute_order_rows_staggered(order::Int;
             hyper_radiative = rows_hyper_rad,
             laplacian = rows_laplacian,
             failures = failures,
-            skipped = gathered.skipped,
+            skipped = skipped,
             success_count = ok,
             total_count = total)
 end

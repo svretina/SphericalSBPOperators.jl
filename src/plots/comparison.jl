@@ -30,14 +30,9 @@ function _comparison_profile_data(r::AbstractVector, profile::Symbol, power::Int
 end
 
 function _comparison_title(profile::Symbol, power::Int, h::Real, p::Int)
-    if profile === :monomial
-        return latexstring("\\mathrm{D}(r^{$(power)}),\\ dr = ", string(Float64(h)),
-                           ",\\ p = ", string(p))
-    elseif profile === :analytic
-        return latexstring("\\mathrm{D}(r e^{-r^2}) = (3 - 2r^2)e^{-r^2},\\ dr = ",
-                           string(Float64(h)), ",\\ p = ", string(p))
-    end
-    throw(ArgumentError("Unsupported comparison profile `$profile`. Use `:monomial` or `:analytic`."))
+    profile in (:monomial, :analytic) ||
+        throw(ArgumentError("Unsupported comparison profile `$profile`. Use `:monomial` or `:analytic`."))
+    return "Spherical Divergence comparison"
 end
 
 function _comparison_value_ylabel(profile::Symbol, power::Int)
@@ -236,31 +231,25 @@ function plot_divergence_comparison(;
         throw(ArgumentError("Unsupported comparison profile `$profile`. Use `:monomial` or `:analytic`."))
     end
     h > 0 || throw(ArgumentError("`h` must be positive."))
-    # For diagonal and non-diagonal operators the folded grid includes the origin and
-    # outer boundary, so `npoints` physical points means `R = (npoints - 1)h`.
     # For staggered operators the folded grid uses half-offset points
     # `h/2, 3h/2, ..., (2npoints-1)h/2`, so `npoints` points with spacing `h`
     # means `R = (npoints - 0.5)h`.
-    R_collocated = (npoints - 1) * Float64(h)
     R_staggered = (npoints - 0.5) * Float64(h)
-
-    attempted_families = (_try_family_construction("Diagonal", :royalblue4) do
-                              diagonal_spherical_operators(source;
-                                                  accuracy_order = accuracy_order,
-                                                  N = npoints - 1,
-                                                  R = R_collocated,
-                                                  p = p,
-                                                  mode = mode)
-                          end,
-                          _try_family_construction("Mixed-order diagonal", :mediumpurple4) do
-                              mixed_order_diagonal_spherical_operators(source;
-                                                                       accuracy_order = accuracy_order,
-                                                                       N = npoints - 1,
-                                                                       R = Float64(R_collocated),
+    non_diagonal_builder = accuracy_order == 6 ?
+                           (() -> non_diagonal_exp_spherical_operators(source;
+                                                                       N = npoints,
+                                                                       h = h,
                                                                        p = p,
-                                                                       mode = mode)
-                          end,
-                          _try_family_construction("Staggered", :darkorange3) do
+                                                                       mode = mode,
+                                                                       outer_boundary_closure_help = false)) :
+                           (() -> non_diagonal_spherical_operators(source;
+                                                                   accuracy_order = accuracy_order,
+                                                                   N = npoints,
+                                                                   h = h,
+                                                                   p = p,
+                                                                   mode = mode))
+
+    attempted_families = (_try_family_construction("Staggered", :darkorange3) do
                               staggered_spherical_operators(source;
                                                             accuracy_order = accuracy_order,
                                                             N = npoints,
@@ -269,12 +258,7 @@ function plot_divergence_comparison(;
                                                             mode = mode)
                           end,
                           _try_family_construction("Non-diagonal", :seagreen4) do
-                              non_diagonal_spherical_operators(source;
-                                                               accuracy_order = accuracy_order,
-                                                               N = npoints,
-                                                               h = h,
-                                                               p = p,
-                                                               mode = mode)
+                              non_diagonal_builder()
                           end)
 
     families = collect(filter(family -> !family.skipped, attempted_families))
@@ -381,8 +365,7 @@ function plot_divergence_comparison(;
 
         Label(fig[0, 1:nfamilies],
               _comparison_title(profile, power, h, p);
-              fontsize = COMPARISON_FIGURE_TITLE_SIZE,
-              font = :bold)
+              fontsize = COMPARISON_FIGURE_TITLE_SIZE)
         fig
     end
 

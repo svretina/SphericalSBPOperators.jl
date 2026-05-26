@@ -1,11 +1,11 @@
-# Graph Report - .  (2026-05-21)
+# Graph Report - .  (2026-05-26)
 
 ## Corpus Check
-- 81 files · ~160,168 words
+- 81 files · ~157,790 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1027 nodes · 2225 edges · 54 communities detected
+- 1044 nodes · 2284 edges · 54 communities detected
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS
 - Token cost: 0 input · 0 output
 
@@ -68,14 +68,14 @@
 ## God Nodes (most connected - your core abstractions)
 1. `SummationByPartsOperators` - 26 edges
 2. `SphericalSBPOperators` - 19 edges
-3. `main()` - 19 edges
-4. `LinearAlgebra` - 17 edges
-5. `_gundlach_pointwise_error_history()` - 17 edges
-6. `SphericalSBPOperators` - 16 edges
-7. `SparseArrays` - 16 edges
-8. `diagnose()` - 16 edges
-9. `gundlach_error_norm()` - 15 edges
-10. `_gundlach_pointwise_error_history_with_reference()` - 15 edges
+3. `plot_all_resolution_analytic_errors_for_paper()` - 19 edges
+4. `main()` - 19 edges
+5. `plot_all_resolution_analytic_snapshots_for_paper()` - 18 edges
+6. `LinearAlgebra` - 17 edges
+7. `_gundlach_pointwise_error_history()` - 17 edges
+8. `SphericalSBPOperators` - 16 edges
+9. `SparseArrays` - 16 edges
+10. `diagnose()` - 16 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `spherical_operators()` --calls--> `_infer_interior_accuracy_order()`  [EXTRACTED]
@@ -93,11 +93,11 @@
 
 ### Community 0 - "Community 0"
 Cohesion: 0.05
-Nodes (112): load_simulation_files(), make_all_paper_plots(), _paper_all_families_first_point_error_filename(), _paper_all_families_first_point_error_title(), _paper_all_family_first_point_divergence_error_data(), _paper_all_resolution_analytic_error_snapshot_figure(), _paper_all_resolution_error_snapshot_figure(), _paper_analytic_reference() (+104 more)
+Nodes (121): load_simulation_files(), make_all_paper_plots(), _paper_all_families_first_point_error_filename(), _paper_all_families_first_point_error_title(), _paper_all_family_first_point_divergence_error_data(), _paper_all_resolution_analytic_error_figure(), _paper_all_resolution_analytic_snapshot_figure(), _paper_all_resolution_error_snapshot_figure() (+113 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.03
-Nodes (81): animate_field_evolution, CairoMakie, _construct_operator(), construct_operators(), _normalized_families(), _print_summary(), _validate_operator(), DelimitedFiles (+73 more)
+Nodes (82): animate_field_evolution, CairoMakie, _construct_operator(), construct_operators(), _normalized_families(), _print_summary(), _validate_operator(), DelimitedFiles (+74 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.09
@@ -105,7 +105,7 @@ Nodes (55): _advance_to_time_index(), _align_reference_to_grid(), _analytic_refe
 
 ### Community 3 - "Community 3"
 Cohesion: 0.09
-Nodes (47): Dates, _algorithm_tag(), _boundary_group(), _build_characteristic_data(), _build_even_gaussian_pi_data(), _build_even_gaussian_pi_zero_psi_data(), _build_initial_data(), _build_regular_left_moving_spherical_gaussian_data() (+39 more)
+Nodes (48): Dates, _algorithm_tag(), _boundary_group(), _build_characteristic_data(), _build_even_gaussian_pi_data(), _build_even_gaussian_pi_zero_psi_data(), _build_initial_data(), _build_regular_left_moving_spherical_gaussian_data() (+40 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.12
@@ -145,19 +145,19 @@ Nodes (28): add_fix_col!(), base_zero_pairs(), build_problem(), build_specs(), c
 
 ### Community 13 - "Community 13"
 Cohesion: 0.15
-Nodes (19): apply_boundary_conditions!(), apply_characteristic_bc_sat!(), apply_symmetry_constraints!(), apply_symmetry_rhs!(), apply_symmetry_state!(), apply_wave_constraints!(), boundary_characteristic_residual(), boundary_characteristics() (+11 more)
+Nodes (27): _as_big_rational(), _assemble_hyperbolic_block(), _boundary_model_tag(), _build_banded_ops(), _clean_small(), collect_sbp_sources(), _compute_order_rows(), _construct_source_instance() (+19 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.17
-Nodes (23): _as_big_rational(), _assemble_hyperbolic_block(), _build_banded_ops(), _clean_small(), collect_sbp_sources(), _compute_order_rows(), _construct_source_instance(), _export_tables_to_dir() (+15 more)
+Cohesion: 0.15
+Nodes (19): apply_boundary_conditions!(), apply_characteristic_bc_sat!(), apply_symmetry_constraints!(), apply_symmetry_rhs!(), apply_symmetry_state!(), apply_wave_constraints!(), boundary_characteristic_residual(), boundary_characteristics() (+11 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.19
-Nodes (21): InteractiveUtils, _build_spherical_ops(), _citation_entry(), collect_sbp_sources(), _construct_source_instance(), _fallback_bib_entry(), first_order_hyperbolic_spatial_operator(), first_order_hyperbolic_spectrum() (+13 more)
+Cohesion: 0.16
+Nodes (20): _axis_limits(), _collect_method_spectra(), _export_plots_to_dir(), generate_banded_spectrum_plots(), generate_diagonal_spectrum_plots(), generate_method_spectrum_plots(), _hyperbolic_plot_title(), _legend_entry() (+12 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.17
-Nodes (19): _axis_limits(), _collect_method_spectra(), _export_plots_to_dir(), generate_banded_spectrum_plots(), generate_diagonal_spectrum_plots(), generate_method_spectrum_plots(), _legend_entry(), _legend_nbanks() (+11 more)
+Cohesion: 0.19
+Nodes (21): InteractiveUtils, _build_spherical_ops(), _citation_entry(), collect_sbp_sources(), _construct_source_instance(), _fallback_bib_entry(), first_order_hyperbolic_spatial_operator(), first_order_hyperbolic_spectrum() (+13 more)
 
 ### Community 17 - "Community 17"
 Cohesion: 0.2
@@ -168,16 +168,16 @@ Cohesion: 0.22
 Nodes (18): _add_row!(), _assemble_mass(), BlockMassQPConfig, _build_block_pairs(), _build_linear_system(), _canonical_grid(), _independent_row_indices(), _infer_boundary_accuracy() (+10 more)
 
 ### Community 19 - "Community 19"
+Cohesion: 0.23
+Nodes (14): assemble_block_operator(), discrete_energy(), dominant_real_projection(), inward_packet_initial_data(), _normalize_boundary_condition(), nullspace_and_checkerboard(), oscillation_metrics(), reflection_ibvp_test() (+6 more)
+
+### Community 20 - "Community 20"
 Cohesion: 0.25
 Nodes (16): _argmax_sparse_float(), _diag_and_offdiag_max_float(), diagnose(), interpret_diagnostics(), _maxabs_float(), _maxabs_sparse_float(), _maxabs_sparse_rows_float(), _pointwise_error_summary() (+8 more)
 
-### Community 20 - "Community 20"
+### Community 21 - "Community 21"
 Cohesion: 0.17
 Nodes (13): AbstractWaveOperatorKind, wave_D_kernel(), wave_D_mul!(), wave_Geven_kernel(), wave_Geven_mul!(), _wave_kernel_boundary_mul!(), _wave_kernel_interior_range(), wave_kernel_mul!() (+5 more)
-
-### Community 21 - "Community 21"
-Cohesion: 0.22
-Nodes (14): add_fix_col!(), build_pair_order(), build_problem(), build_step_system(), ensure_dir(), evaluate_solution(), main(), pair_string() (+6 more)
 
 ### Community 22 - "Community 22"
 Cohesion: 0.32
@@ -332,12 +332,12 @@ Nodes (0):
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `SummationByPartsOperators` connect `Community 1` to `Community 0`, `Community 3`, `Community 5`, `Community 7`, `Community 9`, `Community 10`, `Community 11`, `Community 12`, `Community 14`, `Community 15`, `Community 18`, `Community 21`?**
-  _High betweenness centrality (0.117) - this node is a cross-community bridge._
-- **Why does `SphericalSBPOperators` connect `Community 1` to `Community 0`, `Community 7`, `Community 9`, `Community 10`, `Community 11`, `Community 12`, `Community 14`, `Community 15`, `Community 16`, `Community 21`?**
-  _High betweenness centrality (0.065) - this node is a cross-community bridge._
-- **Why does `Printf` connect `Community 1` to `Community 0`, `Community 3`, `Community 5`, `Community 14`, `Community 15`, `Community 16`, `Community 18`?**
-  _High betweenness centrality (0.039) - this node is a cross-community bridge._
+- **Why does `SummationByPartsOperators` connect `Community 1` to `Community 0`, `Community 3`, `Community 5`, `Community 7`, `Community 9`, `Community 10`, `Community 11`, `Community 12`, `Community 13`, `Community 16`, `Community 18`, `Community 19`?**
+  _High betweenness centrality (0.119) - this node is a cross-community bridge._
+- **Why does `SphericalSBPOperators` connect `Community 1` to `Community 0`, `Community 7`, `Community 9`, `Community 10`, `Community 11`, `Community 12`, `Community 13`, `Community 15`, `Community 16`, `Community 19`?**
+  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+- **Why does `Printf` connect `Community 1` to `Community 0`, `Community 3`, `Community 5`, `Community 13`, `Community 15`, `Community 16`, `Community 18`, `Community 19`?**
+  _High betweenness centrality (0.041) - this node is a cross-community bridge._
 - **What connects `LinearSolve`, `SpecialFunctions`, `NonDiagonalMassSphericalOperators` to the rest of the system?**
   _13 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
