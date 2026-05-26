@@ -2,7 +2,8 @@ function _build_full_grid_objects(source;
                                   accuracy_order::Int,
                                   N::Int,
                                   R,
-                                  mode)
+                                  mode,
+                                  build_matrix::Symbol = :probe)
     N > 0 || throw(ArgumentError("`N` must be positive."))
     accuracy_order > 0 || throw(ArgumentError("`accuracy_order` must be positive."))
 
