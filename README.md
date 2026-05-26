@@ -1,7 +1,28 @@
 # SphericalSBPOperators
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20400455.svg)](https://doi.org/10.5281/zenodo.20400455)
+
+
 `SphericalSBPOperators.jl` builds spherical-symmetry SBP operators on `[0, R]` by
 folding Cartesian SBP operators from a mirrored grid `[-R, R]`.
+
+**THIS REPO IS UNDER CONSTRUCTION AND HAS NO DOCUMENTATION**
+BREAKING CHANGES WILL OCCUR WITHOUT WARNING IN THE NEAR FUTURE. 
+arXiv preprint will be added in the next month. 
+repo will get sanitized in the next months.
+
+```
+@software{stamatis_vretinaris_2026_20400455,
+  author       = {Stamatis Vretinaris},
+  title        = {svretina/SphericalSBPOperators.jl: v0.1.0-alpha},
+  month        = may,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v0.1.0-alpha},
+  doi          = {10.5281/zenodo.20400455},
+  url          = {https://doi.org/10.5281/zenodo.20400455},
+}
+```
 
 ## Theory summary
 
