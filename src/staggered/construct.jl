@@ -51,6 +51,22 @@ function _set_divergence_rows!(
     return D
 end
 
+function _naive_divergence(
+        Godd::SparseMatrixCSC{T, Ti},
+        r::Vector{T},
+        p::Int;
+        snap_factor::Float64
+    ) where {T <: Real, Ti <: Integer}
+    length(r) == size(Godd, 1) == size(Godd, 2) ||
+        throw(DimensionMismatch("Naive staggered divergence requires a square operator matching the staggered grid length."))
+    any(==(zero(T)), r) &&
+        throw(ArgumentError("Naive staggered divergence requires strictly positive staggered grid points."))
+
+    D = sparse(Godd + spdiagm(0 => convert(T, p) ./ r))
+    snap_sparse!(D; snap_factor = snap_factor)
+    return D
+end
+
 function _uniform_spacing(r::Vector{T}; atol::T) where {T <: AbstractFloat}
     length(r) >= 2 ||
         throw(ArgumentError("At least two grid points are required to infer spacing."))
@@ -156,6 +172,7 @@ function scale_spherical_operators(
         Geven_scaled,
         Godd_scaled,
         D_scaled,
+        ops.divergence_method,
         ops.closure_width,
         ops.accuracy_order,
         ops.p,
@@ -181,6 +198,7 @@ function spherical_operators(
         N,
         R,
         p::Int = 2,
+        method::Symbol = :standard,
         mode = FastMode(),
         atol = nothing,
         snap_factor::Float64 = 64.0,
@@ -189,6 +207,8 @@ function spherical_operators(
         target_eltype::Union{Nothing, Type} = nothing
     )
     p >= 0 || throw(ArgumentError("`p` must satisfy p >= 0."))
+    method in (:standard, :naive) ||
+        throw(ArgumentError("Unsupported staggered method `$method`. Use `:standard` or `:naive`."))
     custom_stencil_cols === nothing ||
         throw(ArgumentError("`custom_stencil_cols` is not used in staggered mode."))
 
@@ -233,10 +253,15 @@ function spherical_operators(
     all(!=(zero(T)), Hdiag) ||
         throw(ArgumentError("Staggered mass matrix contains zero diagonal entries."))
 
-    RHS = sparse(B - transpose(Geven) * H)
-    D = spzeros(T, Nh, Nh)
-    _set_divergence_rows!(D, RHS, Hdiag)
-    snap_sparse!(D; snap_factor = snap_factor)
+    D = if method === :standard
+        RHS = sparse(B - transpose(Geven) * H)
+        Dstandard = spzeros(T, Nh, Nh)
+        _set_divergence_rows!(Dstandard, RHS, Hdiag)
+        snap_sparse!(Dstandard; snap_factor = snap_factor)
+        Dstandard
+    else
+        _naive_divergence(Godd, r, p; snap_factor = snap_factor)
+    end
 
     closure_pattern = _closure_diagnostics(Geven)
     closure_from_operator = _boundary_closure_width_from_operator(Dfull)
@@ -251,6 +276,7 @@ function spherical_operators(
         Geven,
         Godd,
         D,
+        method,
         closure_width,
         Int(accuracy_order),
         p,

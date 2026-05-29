@@ -83,6 +83,9 @@ const DEFAULT_OPERATOR_CONFIG = (
                                  # Metric power in r^p.
                                  p = 2,
 
+                                 # Divergence assembly used by the staggered family.
+                                 staggered_method = :standard,
+
                                  # Arithmetic/extraction mode from SummationByPartsOperators.
                                  mode = SafeMode(),
 
@@ -596,6 +599,7 @@ function _construct_wave_operator(config)
                                                                   N = config.N,
                                                                   R = config.R,
                                                                   p = config.p,
+                                                                  method = config.staggered_method,
                                                                   mode = config.mode,
                                                                   target_eltype = config.target_eltype)
         report = SphericalSBPOperators.validate_staggered(ops;
@@ -642,6 +646,11 @@ function _select_algorithm(alg_name::Symbol, boundary_condition::Symbol)
     end
 
     throw(ArgumentError("`alg_name` must be :auto, :dp8, :tsitpap8, :rk4, or :implicit_midpoint."))
+end
+
+function _default_operator_backend(family::Symbol)
+    return family in (:diagonal, :mixed_order_diagonal, :non_diagonal) ? :kernel :
+           :sparse
 end
 
 function _algorithm_tag(alg)
@@ -839,6 +848,7 @@ function _resolve_convergence_dt(; family::Symbol,
                                  N::Int,
                                  R,
                                  p::Int,
+                                 staggered_method::Symbol,
                                  mode,
                                  outer_boundary_closure_help::Bool,
                                  target_eltype::Union{Nothing, Type},
@@ -858,6 +868,7 @@ function _resolve_convergence_dt(; family::Symbol,
                        N = N,
                        R = R,
                        p = p,
+                       staggered_method = staggered_method,
                        mode = mode,
                        outer_boundary_closure_help = outer_boundary_closure_help,
                        target_eltype = target_eltype)
@@ -895,20 +906,31 @@ function _gundlach_save_path(accuracy_order::Int,
                              family::Symbol,
                              alg,
                              target_eltype::Type;
+                             cfl::Real,
                              initial_data_kind::Symbol,
                              boundary_condition::Symbol,
+                             staggered_method::Symbol = :standard,
                              outer_boundary_closure_help::Bool = true)
-    family_tag = family === :non_diagonal ? "non_diagonal" :
+    family_tag = family === :staggered && staggered_method === :naive ? "staggered_naive" :
+                 family === :non_diagonal ? "non_diagonal" :
                  family === :non_diagonal_exp ?
                  (outer_boundary_closure_help ? "non_diagonal_exp" :
                   "non_diagonal_exp_no_outer_boundary_help") :
                  string(family)
     boundary_group = _boundary_group(boundary_condition)
     alg_tag = _algorithm_tag(alg)
+    cfl_tag = _cfl_filename_tag(cfl)
     eltype_tag = _eltype_tag(target_eltype)
     stem = _initial_data_save_stem(initial_data_kind)
-    filename = "$(stem)_$(accuracy_order)th_order_$(family_tag)_$(alg_tag)_$(eltype_tag).jld2"
+    filename = "$(stem)_$(accuracy_order)th_order_$(family_tag)_$(cfl_tag)_$(alg_tag)_$(eltype_tag).jld2"
     return joinpath("data", "sims", boundary_group, filename)
+end
+
+function _cfl_filename_tag(cfl::Real)
+    cfl > 0 || throw(ArgumentError("`cfl` must be positive."))
+    cfl_text = @sprintf("%.12g", Float64(cfl))
+    cfl_text = replace(cfl_text, "-" => "m", "." => "p")
+    return "cfl$(cfl_text)"
 end
 
 function run_mixed_order_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
@@ -935,6 +957,7 @@ function run_mixed_order_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.
                                       N = N,
                                       R = R,
                                       p = p,
+                                      staggered_method = DEFAULT_OPERATOR_CONFIG.staggered_method,
                                       mode = DEFAULT_OPERATOR_CONFIG.mode,
                                       outer_boundary_closure_help = DEFAULT_OPERATOR_CONFIG.outer_boundary_closure_help,
                                       target_eltype = target_eltype,
@@ -1084,8 +1107,258 @@ function run_mixed_order_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.
                                     family,
                                     run_h.alg,
                                     eltype(run_h.ops.r);
+                                    cfl = run_h.diagnostics.cfl,
                                     initial_data_kind = run_h.initial_data.kind,
                                     boundary_condition = run_h.wave_config.boundary_condition,
+                                    outer_boundary_closure_help = run_h.operator_config.outer_boundary_closure_help)
+    mkpath(dirname(save_path))
+    println("  path = ", save_path)
+    runs = if isnothing(run_h32)
+        (; run_h = run_h,
+         run_h2 = run_h2,
+         run_h4 = run_h4,
+         run_h8 = run_h8,
+         run_h16 = run_h16)
+    else
+        (; run_h = run_h,
+         run_h2 = run_h2,
+         run_h4 = run_h4,
+         run_h8 = run_h8,
+         run_h16 = run_h16,
+         run_h32 = run_h32)
+    end
+    metadata = _bundle_metadata(save_path, runs)
+    metadata_markdown = _bundle_metadata_markdown(save_path, runs)
+    if isnothing(run_h32)
+        jldsave(save_path;
+                metadata = metadata,
+                metadata_markdown = metadata_markdown,
+                run_h = runs.run_h,
+                run_h2 = runs.run_h2,
+                run_h4 = runs.run_h4,
+                run_h8 = runs.run_h8,
+                run_h16 = runs.run_h16)
+    else
+        jldsave(save_path;
+                metadata = metadata,
+                metadata_markdown = metadata_markdown,
+                run_h = runs.run_h,
+                run_h2 = runs.run_h2,
+                run_h4 = runs.run_h4,
+                run_h8 = runs.run_h8,
+                run_h16 = runs.run_h16,
+                run_h32 = runs.run_h32)
+    end
+    println("  metadata = JLD2:/metadata")
+    println("Done!")
+end
+
+function run_staggered(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
+                       save_every::Int = 1, T_final::Real = 20.0, N::Int = 25,
+                       R::Real = 25.0,
+                       staggered_method::Symbol = :standard,
+                       target_eltype::Union{Nothing, Type} = DEFAULT_OPERATOR_CONFIG.target_eltype,
+                       boundary_condition::Symbol = DEFAULT_WAVE_CONFIG.boundary_condition,
+                       initial_data_kind::Symbol = DEFAULT_WAVE_CONFIG.initial_data_kind,
+                       enforce_origin::Bool = DEFAULT_WAVE_CONFIG.enforce_origin,
+                       check_provided_dt_stability::Bool = DEFAULT_WAVE_CONFIG.check_provided_dt_stability,
+                       incoming_amplitude::Real = DEFAULT_WAVE_CONFIG.incoming_amplitude,
+                       incoming_center::Real = DEFAULT_WAVE_CONFIG.incoming_center,
+                       incoming_radius::Real = DEFAULT_WAVE_CONFIG.incoming_radius,
+                       outgoing_amplitude::Real = DEFAULT_WAVE_CONFIG.outgoing_amplitude,
+                       gaussian_pi_amplitude::Real = DEFAULT_WAVE_CONFIG.gaussian_pi_amplitude,
+                       gaussian_pi_center::Real = DEFAULT_WAVE_CONFIG.gaussian_pi_center,
+                       gaussian_pi_width::Real = DEFAULT_WAVE_CONFIG.gaussian_pi_width,
+                       regular_gaussian_amplitude::Real = DEFAULT_WAVE_CONFIG.regular_gaussian_amplitude,
+                       regular_gaussian_width::Real = DEFAULT_WAVE_CONFIG.regular_gaussian_width,
+                       regular_gaussian_center::Real = DEFAULT_WAVE_CONFIG.regular_gaussian_center,
+                       alg_name::Symbol = DEFAULT_WAVE_CONFIG.alg_name,
+                       include_h32::Bool = false)
+    family = :staggered
+    dt_base = _resolve_convergence_dt(family = family,
+                                      source = DEFAULT_OPERATOR_CONFIG.source,
+                                      accuracy_order = accuracy_order,
+                                      N = N,
+                                      R = R,
+                                      p = p,
+                                      staggered_method = staggered_method,
+                                      mode = DEFAULT_OPERATOR_CONFIG.mode,
+                                      outer_boundary_closure_help = DEFAULT_OPERATOR_CONFIG.outer_boundary_closure_help,
+                                      target_eltype = target_eltype,
+                                      dt = dt,
+                                      safety_factor = DEFAULT_WAVE_CONFIG.safety_factor,
+                                      boundary_condition = boundary_condition,
+                                      alg_name = alg_name,
+                                      enforce_origin = enforce_origin)
+    println("Running staggered SBP operators for accuracy order $accuracy_order (method=$(staggered_method))...")
+    println("================================================================================")
+    println("Running baseline (h)")
+    run_h = run_simulation(family = family,
+                           accuracy_order = accuracy_order,
+                           N = N,
+                           R = R,
+                           p = p,
+                           staggered_method = staggered_method,
+                           target_eltype = target_eltype,
+                           boundary_condition = boundary_condition,
+                           initial_data_kind = initial_data_kind,
+                           enforce_origin = enforce_origin,
+                           incoming_amplitude = incoming_amplitude,
+                           incoming_center = incoming_center,
+                           incoming_radius = incoming_radius,
+                           outgoing_amplitude = outgoing_amplitude,
+                           gaussian_pi_amplitude = gaussian_pi_amplitude,
+                           gaussian_pi_center = gaussian_pi_center,
+                           gaussian_pi_width = gaussian_pi_width,
+                           regular_gaussian_amplitude = regular_gaussian_amplitude,
+                           regular_gaussian_width = regular_gaussian_width,
+                           regular_gaussian_center = regular_gaussian_center,
+                           alg_name = alg_name,
+                           check_provided_dt_stability = check_provided_dt_stability,
+                           T_final = T_final, dt = dt_base,
+                           save_every = save_every)
+    println("Running h/2")
+    run_h2 = run_simulation(family = family,
+                            accuracy_order = accuracy_order,
+                            N = N * 2,
+                            R = R,
+                            p = p,
+                            staggered_method = staggered_method,
+                            target_eltype = target_eltype,
+                            boundary_condition = boundary_condition,
+                            initial_data_kind = initial_data_kind,
+                            enforce_origin = enforce_origin,
+                            incoming_amplitude = incoming_amplitude,
+                            incoming_center = incoming_center,
+                            incoming_radius = incoming_radius,
+                            outgoing_amplitude = outgoing_amplitude,
+                            gaussian_pi_amplitude = gaussian_pi_amplitude,
+                            gaussian_pi_center = gaussian_pi_center,
+                            gaussian_pi_width = gaussian_pi_width,
+                            regular_gaussian_amplitude = regular_gaussian_amplitude,
+                            regular_gaussian_width = regular_gaussian_width,
+                            regular_gaussian_center = regular_gaussian_center,
+                            alg_name = alg_name,
+                            check_provided_dt_stability = check_provided_dt_stability,
+                            T_final = T_final, dt = dt_base / 2,
+                            save_every = save_every * 2)
+    println("Running h/4")
+    run_h4 = run_simulation(family = family,
+                            accuracy_order = accuracy_order,
+                            N = N * 4,
+                            R = R,
+                            p = p,
+                            staggered_method = staggered_method,
+                            target_eltype = target_eltype,
+                            boundary_condition = boundary_condition,
+                            initial_data_kind = initial_data_kind,
+                            enforce_origin = enforce_origin,
+                            incoming_amplitude = incoming_amplitude,
+                            incoming_center = incoming_center,
+                            incoming_radius = incoming_radius,
+                            outgoing_amplitude = outgoing_amplitude,
+                            gaussian_pi_amplitude = gaussian_pi_amplitude,
+                            gaussian_pi_center = gaussian_pi_center,
+                            gaussian_pi_width = gaussian_pi_width,
+                            regular_gaussian_amplitude = regular_gaussian_amplitude,
+                            regular_gaussian_width = regular_gaussian_width,
+                            regular_gaussian_center = regular_gaussian_center,
+                            alg_name = alg_name,
+                            check_provided_dt_stability = check_provided_dt_stability,
+                            T_final = T_final, dt = dt_base / 4,
+                            save_every = save_every * 4)
+    println("Running h/8")
+    run_h8 = run_simulation(family = family,
+                            accuracy_order = accuracy_order,
+                            N = N * 8,
+                            R = R,
+                            p = p,
+                            staggered_method = staggered_method,
+                            target_eltype = target_eltype,
+                            boundary_condition = boundary_condition,
+                            initial_data_kind = initial_data_kind,
+                            enforce_origin = enforce_origin,
+                            incoming_amplitude = incoming_amplitude,
+                            incoming_center = incoming_center,
+                            incoming_radius = incoming_radius,
+                            outgoing_amplitude = outgoing_amplitude,
+                            gaussian_pi_amplitude = gaussian_pi_amplitude,
+                            gaussian_pi_center = gaussian_pi_center,
+                            gaussian_pi_width = gaussian_pi_width,
+                            regular_gaussian_amplitude = regular_gaussian_amplitude,
+                            regular_gaussian_width = regular_gaussian_width,
+                            regular_gaussian_center = regular_gaussian_center,
+                            alg_name = alg_name,
+                            check_provided_dt_stability = check_provided_dt_stability,
+                            T_final = T_final, dt = dt_base / 8,
+                            save_every = save_every * 8)
+    println("Running h/16")
+    run_h16 = run_simulation(family = family,
+                             accuracy_order = accuracy_order,
+                             N = N * 16,
+                             R = R,
+                             p = p,
+                             staggered_method = staggered_method,
+                             target_eltype = target_eltype,
+                             boundary_condition = boundary_condition,
+                             initial_data_kind = initial_data_kind,
+                             enforce_origin = enforce_origin,
+                             incoming_amplitude = incoming_amplitude,
+                             incoming_center = incoming_center,
+                             incoming_radius = incoming_radius,
+                             outgoing_amplitude = outgoing_amplitude,
+                             gaussian_pi_amplitude = gaussian_pi_amplitude,
+                             gaussian_pi_center = gaussian_pi_center,
+                             gaussian_pi_width = gaussian_pi_width,
+                             regular_gaussian_amplitude = regular_gaussian_amplitude,
+                             regular_gaussian_width = regular_gaussian_width,
+                             regular_gaussian_center = regular_gaussian_center,
+                             alg_name = alg_name,
+                             check_provided_dt_stability = check_provided_dt_stability,
+                             T_final = T_final, dt = dt_base / 16,
+                             save_every = save_every * 16)
+    run_h32 = nothing
+    if include_h32
+        println("Running h/32")
+        run_h32 = try
+            run_simulation(family = family,
+                           accuracy_order = accuracy_order,
+                           N = N * 32,
+                           R = R,
+                           p = p,
+                           staggered_method = staggered_method,
+                           target_eltype = target_eltype,
+                           boundary_condition = boundary_condition,
+                           initial_data_kind = initial_data_kind,
+                           enforce_origin = enforce_origin,
+                           incoming_amplitude = incoming_amplitude,
+                           incoming_center = incoming_center,
+                           incoming_radius = incoming_radius,
+                           outgoing_amplitude = outgoing_amplitude,
+                           gaussian_pi_amplitude = gaussian_pi_amplitude,
+                           gaussian_pi_center = gaussian_pi_center,
+                           gaussian_pi_width = gaussian_pi_width,
+                           regular_gaussian_amplitude = regular_gaussian_amplitude,
+                           regular_gaussian_width = regular_gaussian_width,
+                           regular_gaussian_center = regular_gaussian_center,
+                           alg_name = alg_name,
+                           check_provided_dt_stability = check_provided_dt_stability,
+                           T_final = T_final, dt = dt_base / 32,
+                           save_every = save_every * 32)
+        catch e
+            println("Failed to run h/32 simulation: ", e)
+            nothing
+        end
+    end
+    println("Saving to file...")
+    save_path = _gundlach_save_path(accuracy_order,
+                                    family,
+                                    run_h.alg,
+                                    eltype(run_h.ops.r);
+                                    cfl = run_h.diagnostics.cfl,
+                                    initial_data_kind = run_h.initial_data.kind,
+                                    boundary_condition = run_h.wave_config.boundary_condition,
+                                    staggered_method = run_h.operator_config.staggered_method,
                                     outer_boundary_closure_help = run_h.operator_config.outer_boundary_closure_help)
     mkpath(dirname(save_path))
     println("  path = ", save_path)
@@ -1405,6 +1678,7 @@ function _metadata_shared_lines(run)
                    "- `accuracy_order`: $(_metadata_format_value(op.accuracy_order))",
                    "- `R`: $(_metadata_format_value(op.R))",
                    "- `p`: $(_metadata_format_value(op.p))",
+                   "- `staggered_method`: $(_metadata_format_value(op.staggered_method))",
                    "- `target_eltype`: $(_metadata_format_value(op.target_eltype))",
                    "- `T_final`: $(_metadata_format_value(wave.T_final))",
                    "- `boundary_condition`: $(_metadata_format_value(wave.boundary_condition))",
@@ -1609,6 +1883,7 @@ function run_simulation(;
                         N::Int = DEFAULT_OPERATOR_CONFIG.N,
                         R = DEFAULT_OPERATOR_CONFIG.R,
                         p::Int = DEFAULT_OPERATOR_CONFIG.p,
+                        staggered_method::Symbol = DEFAULT_OPERATOR_CONFIG.staggered_method,
                         mode = DEFAULT_OPERATOR_CONFIG.mode,
                         outer_boundary_closure_help::Bool = DEFAULT_OPERATOR_CONFIG.outer_boundary_closure_help,
                         target_eltype::Union{Nothing, Type} = DEFAULT_OPERATOR_CONFIG.target_eltype,
@@ -1617,6 +1892,7 @@ function run_simulation(;
                         safety_factor::Real = DEFAULT_WAVE_CONFIG.safety_factor,
                         boundary_condition::Symbol = DEFAULT_WAVE_CONFIG.boundary_condition,
                         alg_name::Symbol = DEFAULT_WAVE_CONFIG.alg_name,
+                        operator_backend::Union{Nothing, Symbol} = nothing,
                         save_every::Int = DEFAULT_WAVE_CONFIG.save_every,
                         check_provided_dt_stability::Bool = DEFAULT_WAVE_CONFIG.check_provided_dt_stability,
                         enforce_origin::Bool = DEFAULT_WAVE_CONFIG.enforce_origin,
@@ -1639,15 +1915,20 @@ function run_simulation(;
                        N = N,
                        R = R,
                        p = p,
+                       staggered_method = staggered_method,
                        mode = mode,
                        outer_boundary_closure_help = outer_boundary_closure_help,
                        target_eltype = target_eltype)
+    resolved_operator_backend = isnothing(operator_backend) ?
+                                _default_operator_backend(family) :
+                                operator_backend
     wave_config = (;
                    T_final = T_final,
                    dt = dt,
                    safety_factor = safety_factor,
                    boundary_condition = boundary_condition,
                    alg_name = alg_name,
+                   operator_backend = resolved_operator_backend,
                    save_every = save_every,
                    check_provided_dt_stability = check_provided_dt_stability,
                    enforce_origin = enforce_origin,
@@ -1677,10 +1958,8 @@ function run_simulation(;
                                         snap_to_nice = true)
     dt_requested = resolved_dt.dt
 
-    operator_backend = operator_config.family === :non_diagonal_exp ? :sparse :
-                       :kernel
     sol = SphericalSBPOperators.solve_wave_ode(ops;
-                                               operator_backend = operator_backend,
+                                               operator_backend = wave_config.operator_backend,
                                                T_final = wave_config.T_final,
                                                dt = resolved_dt.dt,
                                                alg = alg,
@@ -1738,6 +2017,7 @@ function run_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                                       N = N,
                                       R = R,
                                       p = p,
+                                      staggered_method = DEFAULT_OPERATOR_CONFIG.staggered_method,
                                       mode = DEFAULT_OPERATOR_CONFIG.mode,
                                       outer_boundary_closure_help = DEFAULT_OPERATOR_CONFIG.outer_boundary_closure_help,
                                       target_eltype = target_eltype,
@@ -1905,6 +2185,7 @@ function run_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                                     :diagonal,
                                     run_h.alg,
                                     eltype(run_h.ops.r);
+                                    cfl = run_h.diagnostics.cfl,
                                     initial_data_kind = run_h.initial_data.kind,
                                     boundary_condition = run_h.wave_config.boundary_condition,
                                     outer_boundary_closure_help = run_h.operator_config.outer_boundary_closure_help)
@@ -1969,6 +2250,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                           regular_gaussian_width::Real = DEFAULT_WAVE_CONFIG.regular_gaussian_width,
                           regular_gaussian_center::Real = DEFAULT_WAVE_CONFIG.regular_gaussian_center,
                           alg_name::Symbol = DEFAULT_WAVE_CONFIG.alg_name,
+                          operator_backend::Union{Nothing, Symbol} = nothing,
                           experimental::Bool = false,
                           outer_boundary_closure_help::Bool = DEFAULT_OPERATOR_CONFIG.outer_boundary_closure_help,
                           include_h32::Bool = false)
@@ -1979,6 +2261,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                                       N = N,
                                       R = R,
                                       p = p,
+                                      staggered_method = DEFAULT_OPERATOR_CONFIG.staggered_method,
                                       mode = DEFAULT_OPERATOR_CONFIG.mode,
                                       outer_boundary_closure_help = outer_boundary_closure_help,
                                       target_eltype = target_eltype,
@@ -2015,6 +2298,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                            regular_gaussian_width = regular_gaussian_width,
                            regular_gaussian_center = regular_gaussian_center,
                            alg_name = alg_name,
+                           operator_backend = operator_backend,
                            check_provided_dt_stability = check_provided_dt_stability,
                            T_final = T_final, dt = dt_base,
                            save_every = save_every)
@@ -2040,6 +2324,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                             regular_gaussian_width = regular_gaussian_width,
                             regular_gaussian_center = regular_gaussian_center,
                             alg_name = alg_name,
+                            operator_backend = operator_backend,
                             check_provided_dt_stability = check_provided_dt_stability,
                             T_final = T_final, dt = dt_base / 2,
                             save_every = save_every * 2)
@@ -2065,6 +2350,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                             regular_gaussian_width = regular_gaussian_width,
                             regular_gaussian_center = regular_gaussian_center,
                             alg_name = alg_name,
+                            operator_backend = operator_backend,
                             check_provided_dt_stability = check_provided_dt_stability,
                             T_final = T_final, dt = dt_base / 4,
                             save_every = save_every * 4)
@@ -2090,6 +2376,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                             regular_gaussian_width = regular_gaussian_width,
                             regular_gaussian_center = regular_gaussian_center,
                             alg_name = alg_name,
+                            operator_backend = operator_backend,
                             check_provided_dt_stability = check_provided_dt_stability,
                             T_final = T_final, dt = dt_base / 8,
                             save_every = save_every * 8)
@@ -2115,6 +2402,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                              regular_gaussian_width = regular_gaussian_width,
                              regular_gaussian_center = regular_gaussian_center,
                              alg_name = alg_name,
+                             operator_backend = operator_backend,
                              check_provided_dt_stability = check_provided_dt_stability,
                              T_final = T_final, dt = dt_base / 16,
                              save_every = save_every * 16)
@@ -2143,6 +2431,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                            regular_gaussian_width = regular_gaussian_width,
                            regular_gaussian_center = regular_gaussian_center,
                            alg_name = alg_name,
+                           operator_backend = operator_backend,
                            check_provided_dt_stability = check_provided_dt_stability,
                            T_final = T_final, dt = dt_base / 32,
                            save_every = save_every * 32)
@@ -2156,6 +2445,7 @@ function run_non_diagonal(; accuracy_order::Int = 4, p::Int = 2, dt = 0.01,
                                     family,
                                     run_h.alg,
                                     eltype(run_h.ops.r);
+                                    cfl = run_h.diagnostics.cfl,
                                     initial_data_kind = run_h.initial_data.kind,
                                     boundary_condition = run_h.wave_config.boundary_condition,
                                     outer_boundary_closure_help = run_h.operator_config.outer_boundary_closure_help)

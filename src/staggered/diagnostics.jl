@@ -8,7 +8,8 @@ function interpret_diagnostics(diag; tol::Float64 = 1.0e-10, poly_tol::Float64 =
         push!(conclusions, "Grid checks failed; polynomial diagnostics may be unreliable.")
     end
 
-    sbp_ok = diag.sbp.max_no_origin <= tol
+    sbp_expected = haskey(diag.grid, :sbp_expected) ? diag.grid.sbp_expected : true
+    sbp_ok = !sbp_expected || diag.sbp.max_no_origin <= tol
     flags[:sbp_issue] = !sbp_ok
     if !sbp_ok
         push!(conclusions, "SBP residual exceeds tolerance in staggered construction.")
@@ -127,6 +128,8 @@ function diagnose(
             rend_ok = true,
             r_match_error = 0.0,
             grid_ok = true,
+            divergence_method = ops.divergence_method,
+            sbp_expected = ops.divergence_method === :standard,
             atol_used = atol_diag,
         ),
         folding = (

@@ -3,8 +3,8 @@
 #
 include(joinpath(@__DIR__, "generate_banded_spectrum_plots.jl"))
 
-using CairoMakie: Auto, Axis, Colorbar, Figure, Label, Legend, axislegend, colgap!,
-                  heatmap!, hlines!, lines!, rowgap!, rowsize!, save, scatter!,
+using CairoMakie: Auto, Axis, Colorbar, Figure, Label, Legend, Relative, axislegend,
+                  colgap!, colsize!, heatmap!, hlines!, lines!, rowgap!, rowsize!, save, scatter!,
                   with_theme, xlims!, ylims!
 using JLD2: load
 using LaTeXStrings: @L_str, latexstring
@@ -616,6 +616,16 @@ end
     return [_paper_energy_plain_ticklabel(v) for v in values]
 end
 
+function _paper_radius_axis_spec(xmax::Real)
+    xhi = Float64(xmax)
+    xhi > 0 || throw(ArgumentError("`xmax` must be positive, got $(xmax)."))
+    step = xhi <= 10.0 ? 5.0 : 10.0
+    axis_max = step * ceil(xhi / step)
+    ticks = collect(0.0:step:axis_max)
+    labels = [_paper_energy_plain_ticklabel(tick; digits = 3) for tick in ticks]
+    return (xmax = axis_max, ticks = (ticks, labels))
+end
+
 function _paper_move_legend_lb!(fig)
     legends = [obj for obj in fig.content if obj isa Legend]
     isempty(legends) && return fig
@@ -823,7 +833,14 @@ function _paper_energy_symlog_ticks(histories::AbstractVector, threshold::Real)
     ymax > 0 && append!(ticks, mags)
 
     labels = _paper_energy_plain_tickformat(ticks)
-    return (ticks, labels)
+    unique_ticks = Float64[]
+    unique_labels = String[]
+    for (tick, label) in zip(ticks, labels)
+        label in unique_labels && continue
+        push!(unique_ticks, tick)
+        push!(unique_labels, label)
+    end
+    return (unique_ticks, unique_labels)
 end
 
 function _paper_energy_linear_ticks(histories::AbstractVector)
@@ -1069,7 +1086,8 @@ end
 
 function _paper_time_evolution_figure(simulation;
                                       title::AbstractString,
-                                      interpolate::Bool = true)
+                                      interpolate::Bool = true,
+                                      rescale_by_r::Bool = false)
     sol = _paper_sol(simulation)
     t = Float64.(sol.t)
     r = Float64.(sol.r)
@@ -1080,6 +1098,10 @@ function _paper_time_evolution_figure(simulation;
 
     pi_history = Float64.(sol.Π)
     psi_history = Float64.(sol.Ψ)
+    if rescale_by_r
+        pi_history = r .* pi_history
+        psi_history = r .* psi_history
+    end
     redges = _paper_cell_edges(r)
     tedges = _paper_cell_edges(t)
     pi_spec = _paper_symmetric_colorbar_spec(pi_history; nticks = 5)
@@ -1097,16 +1119,20 @@ function _paper_time_evolution_figure(simulation;
         Label(fig[0, 1:2], title; fontsize = PAPER_TIME_EVOLUTION_TITLE_SIZE, font = :bold,
               padding = (0, 0, 0, 0))
 
+        pi_title = rescale_by_r ? latexstring("r\\Pi(t,r)") : latexstring("\\Pi(t,r)")
+        psi_title = rescale_by_r ? latexstring("r\\Psi(t,r)") : latexstring("\\Psi(t,r)")
         ax_pi = Axis(fig[1, 1];
-                     xlabel = L"r",
+                     xlabel = "",
                      ylabel = "t",
-                     title = latexstring("\\Pi(t,r)"),
+                     title = pi_title,
                      aspect = aspect_ratio)
         ax_psi = Axis(fig[1, 2];
-                      xlabel = L"r",
+                      xlabel = "",
                       ylabel = "t",
-                      title = latexstring("\\Psi(t,r)"),
+                      title = psi_title,
                       aspect = aspect_ratio)
+        colsize!(fig.layout, 1, Relative(0.5))
+        colsize!(fig.layout, 2, Relative(0.5))
 
         hm_pi = heatmap!(ax_pi, redges, tedges, pi_history;
                          colormap = :balance,
@@ -1119,19 +1145,35 @@ function _paper_time_evolution_figure(simulation;
                           interpolate = interpolate,
                           rasterize = 5)
 
-        Colorbar(fig[2, 1], hm_pi;
+        Label(fig[2, 1], L"r";
+              tellwidth = false,
+              tellheight = true,
+              halign = :center,
+              valign = :center,
+              fontsize = PAPER_AXIS_LABEL_SIZE,
+              padding = (0, 0, 0, 0))
+        Label(fig[2, 2], L"r";
+              tellwidth = false,
+              tellheight = true,
+              halign = :center,
+              valign = :center,
+              fontsize = PAPER_AXIS_LABEL_SIZE,
+              padding = (0, 0, 0, 0))
+
+        Colorbar(fig[3, 1], hm_pi;
                  vertical = false,
                  label = "",
                  height = 10,
                  ticks = pi_ticks,
                  ticklabelsize = PAPER_COLORBAR_TICK_LABEL_SIZE)
-        Colorbar(fig[2, 2], hm_psi;
+        Colorbar(fig[3, 2], hm_psi;
                  vertical = false,
                  label = "",
                  height = 10,
                  ticks = psi_ticks,
                  ticklabelsize = PAPER_COLORBAR_TICK_LABEL_SIZE)
-        rowsize!(fig.layout, 2, Auto(0.06))
+        rowsize!(fig.layout, 2, Auto(0.04))
+        rowsize!(fig.layout, 3, Auto(0.06))
         fig
     end
 
@@ -1450,7 +1492,8 @@ function _paper_pointwise_analytic_error_snapshot(simulation;
                                                   time::Real,
                                                   expected_order::Real,
                                                   h0::Real,
-                                                  analytic_reference::NamedTuple)
+                                                  analytic_reference::NamedTuple,
+                                                  plot_R::Union{Nothing, Real} = nothing)
     sol = _paper_sol(simulation)
     idx, t_saved = _paper_time_index(simulation, time)
     r = Float64.(sol.r)
@@ -1459,6 +1502,17 @@ function _paper_pointwise_analytic_error_snapshot(simulation;
     exact = _paper_analytic_solution(t_saved, r, analytic_reference)
     field_sym = SphericalSBPOperators._canonical_wave_field(field)
     u_exact = field_sym === :Π ? Float64.(exact.Π) : Float64.(exact.Ψ)
+    if !isnothing(plot_R)
+        Rplot = Float64(plot_R)
+        Rplot > 0 || throw(ArgumentError("`plot_R` must be positive, got $(plot_R)."))
+        keep = findall(<=(Rplot), r)
+        isempty(keep) &&
+            throw(ArgumentError("`plot_R=$(plot_R)` leaves no grid points to plot. Smallest saved radius is $(first(r))."))
+        last_keep = last(keep)
+        r = r[1:last_keep]
+        u_num = u_num[1:last_keep]
+        u_exact = u_exact[1:last_keep]
+    end
     err = u_num .- u_exact
     h = _paper_grid_spacing(simulation)
     scale = (Float64(h) / Float64(h0))^(-Float64(expected_order))
@@ -1566,7 +1620,8 @@ function _paper_all_resolution_analytic_error_figure(simulations::AbstractVector
                                                      order::Real,
                                                      time::Real,
                                                      h0::Real,
-                                                     analytic_reference::NamedTuple)
+                                                     analytic_reference::NamedTuple,
+                                                     plot_R::Union{Nothing, Real} = nothing)
     length(simulations) == length(resolution_labels) ||
         throw(DimensionMismatch("`simulations` and `resolution_labels` must have the same length."))
     isempty(simulations) &&
@@ -1579,14 +1634,16 @@ function _paper_all_resolution_analytic_error_figure(simulations::AbstractVector
                                                           time = snap_time,
                                                           expected_order = order,
                                                           h0 = h0,
-                                                          analytic_reference = analytic_reference)
+                                                          analytic_reference = analytic_reference,
+                                                          plot_R = plot_R)
                  for sim in simulations]
     psi_errors = [_paper_pointwise_analytic_error_snapshot(sim;
                                                            field = :Ψ,
                                                            time = snap_time,
                                                            expected_order = order,
                                                            h0 = h0,
-                                                           analytic_reference = analytic_reference)
+                                                           analytic_reference = analytic_reference,
+                                                           plot_R = plot_R)
                   for sim in simulations]
 
     bottom_pi_limits = SphericalSBPOperators._finite_limits_with_padding(reduce(vcat,
@@ -1595,6 +1652,8 @@ function _paper_all_resolution_analytic_error_figure(simulations::AbstractVector
     bottom_psi_limits = SphericalSBPOperators._finite_limits_with_padding(reduce(vcat,
                                                                                  (err.scaled_err
                                                                                   for err in psi_errors)))
+    x_upper = isnothing(plot_R) ? maximum(pi_errors[end].r) : Float64(plot_R)
+    x_axis = _paper_radius_axis_spec(x_upper)
 
     title_family = replace(_paper_operator_title_label(family, order),
                            r" operator$" => " operators")
@@ -1611,6 +1670,7 @@ function _paper_all_resolution_analytic_error_figure(simulations::AbstractVector
         ax_epi = Axis(fig[1, 1],
                       xlabel = L"r",
                       ylabel = latexstring("h^{-q}\\left(\\Pi_h - \\Pi_{\\mathrm{analytic}}\\right)"),
+                      xticks = x_axis.ticks,
                       xlabelsize = axis_labelsize,
                       ylabelsize = axis_labelsize,
                       ylabelpadding = ylabelpadding,
@@ -1619,6 +1679,7 @@ function _paper_all_resolution_analytic_error_figure(simulations::AbstractVector
         ax_epsi = Axis(fig[1, 2],
                        xlabel = L"r",
                        ylabel = latexstring("h^{-q}\\left(\\Psi_h - \\Psi_{\\mathrm{analytic}}\\right)"),
+                       xticks = x_axis.ticks,
                        xlabelsize = axis_labelsize,
                        ylabelsize = axis_labelsize,
                        ylabelpadding = ylabelpadding,
@@ -1627,12 +1688,11 @@ function _paper_all_resolution_analytic_error_figure(simulations::AbstractVector
 
         for (ax, limits) in ((ax_epi, bottom_pi_limits),
                              (ax_epsi, bottom_psi_limits))
-            hlines!(ax, [0.0]; color = :black, linewidth = 1.0, linestyle = :dash)
             ylims!(ax, limits...)
         end
 
-        xlims!(ax_epi, minimum(pi_errors[end].r), maximum(pi_errors[end].r))
-        xlims!(ax_epsi, minimum(psi_errors[end].r), maximum(psi_errors[end].r))
+        xlims!(ax_epi, 0.0, x_axis.xmax)
+        xlims!(ax_epsi, 0.0, x_axis.xmax)
 
         visible_resolution_indices = [i
                                       for i in eachindex(resolution_labels)
@@ -2709,13 +2769,16 @@ end
 """
     plot_time_evolution_for_paper(simulations=load_simulation_files(); kwargs...)
 
-Save space-time heatmaps of the evolution for both `Π` and `Ψ` for every loaded
-simulation case. By default the highest saved resolution, `run_h16`, is used.
+    Save space-time heatmaps of the evolution for both `Π` and `Ψ` for every loaded
+    simulation case. By default the highest saved resolution, `run_h16`, is used.
+    Set `rescale_by_r=true` to plot `rΠ` and `rΨ` instead, and label the subplots
+    accordingly.
 """
 function plot_time_evolution_for_paper(simulations = load_simulation_files();
                                        out_dir::AbstractString = PAPER_TIME_EVOLUTION_DIR,
                                        resolution::Symbol = :run_h16,
                                        interpolate::Bool = true,
+                                       rescale_by_r::Bool = false,
                                        file_ext::AbstractString = "pdf")
     mkpath(out_dir)
     outputs = Dict{Tuple{Symbol, Symbol, Int}, String}()
@@ -2732,7 +2795,8 @@ function plot_time_evolution_for_paper(simulations = load_simulation_files();
         title = latexstring("\\mathrm{Time\\ evolution\\ with\\ }6^{\\mathrm{th}}\\ \\mathrm{order\\ non\\ diagonal\\ norm\\ operators.}")
         fig = _paper_time_evolution_figure(sim;
                                            title = title,
-                                           interpolate = interpolate)
+                                           interpolate = interpolate,
+                                           rescale_by_r = rescale_by_r)
         _paper_apply_typography!(fig)
 
         run_token = _paper_run_token(entry, resolution)
@@ -2850,7 +2914,7 @@ function plot_scaled_errors_for_paper(simulations = load_simulation_files();
         println("Creating scaled error plots for $(key)...")
         entry = simulations[key]
         boundary_group = entry.boundary_group
-        boundary_group === :radiative || continue
+        boundary_group === :reflective || continue
         family = entry.family
         order = entry.order
         required_runs = (h0_resolution, selected_resolutions...)
@@ -2914,7 +2978,7 @@ function plot_convergence_snapshots_for_paper(simulations = load_simulation_file
                     by = x -> _paper_case_sort_key(simulations[x]))
         entry = simulations[key]
         boundary_group = entry.boundary_group
-        boundary_group === :radiative || continue
+        boundary_group === :reflective || continue
         family = entry.family
         order = entry.order
         required_runs = (h0_resolution, selected_resolutions...)
@@ -2972,7 +3036,7 @@ function plot_all_resolution_error_snapshots_for_paper(simulations = load_simula
                     by = x -> _paper_case_sort_key(simulations[x]))
         entry = simulations[key]
         boundary_group = entry.boundary_group
-        boundary_group === :radiative || continue
+        boundary_group === :reflective || continue
         family = entry.family
         order = entry.order
         available_resolutions = collect(_paper_available_resolutions(entry.data))
@@ -3108,6 +3172,7 @@ function plot_all_resolution_analytic_errors_for_paper(simulations = nothing;
                                                        sim_dir::AbstractString = joinpath(PAPER_SIM_DIR, "reflective"),
                                                        time::Real = 15.0,
                                                        reflective_time::Union{Nothing, Real} = nothing,
+                                                       plot_R::Union{Nothing, Real} = nothing,
                                                        h0_resolution::Symbol = :run_h,
                                                        file_ext::AbstractString = "pdf")
     mkpath(out_dir)
@@ -3155,7 +3220,8 @@ function plot_all_resolution_analytic_errors_for_paper(simulations = nothing;
                                                         order = order,
                                                         time = case_time,
                                                         h0 = h0,
-                                                        analytic_reference = analytic_reference)
+                                                        analytic_reference = analytic_reference,
+                                                        plot_R = plot_R)
         catch err
             @warn "Skipping all-resolution analytic error figure because the analytic reference is not valid for this case/time." path=entry.path boundary_condition=_paper_entry_boundary_condition(entry) error=sprint(showerror,
                                                                                                                                                                                                     err)
@@ -3169,9 +3235,10 @@ function plot_all_resolution_analytic_errors_for_paper(simulations = nothing;
         resolution_token = join(String.(selected_resolutions), "-")
         h0_token = "h0_from_$(h0_resolution)_$(_paper_number_token(h0))"
         cfl_token = _paper_cfl_token(entry, Tuple(selected_resolutions))
+        plot_R_token = isnothing(plot_R) ? "" : "_Rplot$(_paper_number_token(plot_R))"
         case_out_dir = _paper_case_cfl_out_dir(out_dir, boundary_group, cfl_token)
         path = joinpath(case_out_dir,
-                        "all_resolution_analytic_error_$(initial_data_stem)_$(family_file_tag)_order$(order)_$(run_token)_$(resolution_token)_$(h0_token)_t$(_paper_number_token(plotted.t)).$(file_ext)")
+                        "all_resolution_analytic_error_$(initial_data_stem)_$(family_file_tag)_order$(order)_$(run_token)_$(resolution_token)_$(h0_token)$(plot_R_token)_t$(_paper_number_token(plotted.t)).$(file_ext)")
         save(path, plotted.fig)
         outputs[entry.path] = path
         println("Saved all-resolution analytic error figure: ", path)

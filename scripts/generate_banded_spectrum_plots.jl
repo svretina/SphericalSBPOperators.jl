@@ -301,7 +301,8 @@ function _collect_method_spectra(order::Int;
                                  R::Rational{BigInt},
                                  p::Int,
                                  mode,
-                                 tiny_zero_tol::Float64)
+                                 tiny_zero_tol::Float64,
+                                 boundary_model::Symbol = :sat)
     builder = if method === :banded
         _build_banded_ops
     elseif method === :diagonal
@@ -322,8 +323,10 @@ function _collect_method_spectra(order::Int;
         try
             ops = builder(source, order; points = points, R = R, p = p, mode = mode)
 
-            L_ref = _assemble_hyperbolic_block(ops; bc = :reflecting)
-            L_rad = _assemble_hyperbolic_block(ops; bc = :absorbing)
+            L_ref = _assemble_hyperbolic_block(ops; bc = :reflecting,
+                                               boundary_model = boundary_model)
+            L_rad = _assemble_hyperbolic_block(ops; bc = :absorbing,
+                                               boundary_model = boundary_model)
             L_lap = Matrix(ops.D * ops.Geven)
 
             λ_ref = _to_complex64(_high_precision_schur_values(L_ref);
@@ -367,6 +370,14 @@ function _collect_method_spectra(order::Int;
             total_sources = length(gathered.sources))
 end
 
+function _hyperbolic_plot_title(kind::Symbol, boundary_model::Symbol)
+    kind_label = kind === :reflective ? "reflective" :
+                 kind === :radiative ? "radiative" :
+                 throw(ArgumentError("Unsupported hyperbolic spectrum kind `$kind`."))
+    model_label = _boundary_model_tag(boundary_model)
+    return "Hyperbolic block spectrum ($kind_label, $model_label BC)"
+end
+
 function generate_method_spectrum_plots(;
                                         method::Symbol = :banded,
                                         orders::Tuple{Vararg{Int}} = (4, 6),
@@ -374,6 +385,7 @@ function generate_method_spectrum_plots(;
                                         p::Int = 2,
                                         R::Rational{BigInt} = big(30) // big(1),
                                         tiny_zero_tol::Float64 = 1e-16,
+                                        boundary_model::Symbol = :sat,
                                         mode = SafeMode(),
                                         width_mode::Symbol = :twocolumn,
                                         out_dir::AbstractString = _default_out_dir(method),
@@ -384,6 +396,8 @@ function generate_method_spectrum_plots(;
                                         legend_labelsize::Real = 10)
     mkpath(out_dir)
     method_tag = _method_tag(method)
+    boundary_model = _normalize_spectrum_boundary_model(boundary_model)
+    boundary_tag = _boundary_model_tag(boundary_model)
     rtoken = _R_token(R)
 
     outputs = Dict{Int, Any}()
@@ -394,14 +408,15 @@ function generate_method_spectrum_plots(;
                                        R = R,
                                        p = p,
                                        mode = mode,
-                                       tiny_zero_tol = tiny_zero_tol)
+                                       tiny_zero_tol = tiny_zero_tol,
+                                       boundary_model = boundary_model)
 
         out_ref = joinpath(out_dir,
-                           "hyperbolic_block_reflective_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
+                           "hyperbolic_block_reflective_$(boundary_tag)_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
         out_rad = joinpath(out_dir,
-                           "hyperbolic_block_radiative_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
+                           "hyperbolic_block_radiative_$(boundary_tag)_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
         out_lap = joinpath(out_dir,
-                           "laplacian_divg_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
+                           "laplacian_divg_$(boundary_tag)_$(method_tag)_order$(order)_N$(points)_R$(rtoken).pdf")
 
         ref_path = _maybe_save_overlay_plot(data.hyper_reflective,
                                             out_ref;
@@ -410,7 +425,8 @@ function generate_method_spectrum_plots(;
                                             tick_labelsize = tick_labelsize,
                                             title_size = title_size,
                                             legend_labelsize = legend_labelsize,
-                                            title = L"\mathrm{Hyperbolic\ block\ spectrum\ (reflective)}")
+                                            title = _hyperbolic_plot_title(:reflective,
+                                                                           boundary_model))
         rad_path = _maybe_save_overlay_plot(data.hyper_radiative,
                                             out_rad;
                                             width_mode = width_mode,
@@ -418,7 +434,8 @@ function generate_method_spectrum_plots(;
                                             tick_labelsize = tick_labelsize,
                                             title_size = title_size,
                                             legend_labelsize = legend_labelsize,
-                                            title = L"\mathrm{Hyperbolic\ block\ spectrum\ (radiative)}")
+                                            title = _hyperbolic_plot_title(:radiative,
+                                                                           boundary_model))
         lap_path = _maybe_save_overlay_plot(data.laplacian,
                                             out_lap;
                                             width_mode = width_mode,
@@ -426,7 +443,7 @@ function generate_method_spectrum_plots(;
                                             tick_labelsize = tick_labelsize,
                                             title_size = title_size,
                                             legend_labelsize = legend_labelsize,
-                                            title = L"\mathrm{Laplacian\ spectrum}")
+                                            title = "Laplacian spectrum")
         paths_to_export = String[]
         !isnothing(ref_path) && push!(paths_to_export, ref_path)
         !isnothing(rad_path) && push!(paths_to_export, rad_path)
@@ -440,8 +457,9 @@ function generate_method_spectrum_plots(;
                           total_sources = data.total_sources,
                           failures = data.failures)
 
-        @printf("order=%d plot summary: %d/%d sources succeeded, %d failed\n",
-                order, length(data.laplacian), data.total_sources, length(data.failures))
+        @printf("order=%d boundary_model=%s plot summary: %d/%d sources succeeded, %d failed\n",
+                order, boundary_tag, length(data.laplacian), data.total_sources,
+                length(data.failures))
         println("  reflective: ", out_ref)
         println("  radiative : ", out_rad)
         println("  laplacian : ", out_lap)
@@ -455,6 +473,7 @@ function generate_banded_spectrum_plots(;
                                         p::Int = 2,
                                         R::Rational{BigInt} = big(30) // big(1),
                                         tiny_zero_tol::Float64 = 1e-16,
+                                        boundary_model::Symbol = :sat,
                                         mode = SafeMode(),
                                         width_mode::Symbol = :twocolumn,
                                         out_dir::AbstractString = _default_out_dir(:banded),
@@ -466,6 +485,7 @@ function generate_banded_spectrum_plots(;
                                           p = p,
                                           R = R,
                                           tiny_zero_tol = tiny_zero_tol,
+                                          boundary_model = boundary_model,
                                           mode = mode,
                                           width_mode = width_mode,
                                           out_dir = out_dir,
@@ -477,6 +497,7 @@ function generate_diagonal_spectrum_plots(;
                                           p::Int = 2,
                                           R::Rational{BigInt} = big(30) // big(1),
                                           tiny_zero_tol::Float64 = 1e-16,
+                                          boundary_model::Symbol = :sat,
                                           mode = SafeMode(),
                                           width_mode::Symbol = :twocolumn,
                                           out_dir::AbstractString = _default_out_dir(:diagonal),
@@ -488,6 +509,7 @@ function generate_diagonal_spectrum_plots(;
                                           p = p,
                                           R = R,
                                           tiny_zero_tol = tiny_zero_tol,
+                                          boundary_model = boundary_model,
                                           mode = mode,
                                           width_mode = width_mode,
                                           out_dir = out_dir,

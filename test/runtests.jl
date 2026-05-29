@@ -1,6 +1,6 @@
 using Test
 using SphericalSBPOperators
-using LinearAlgebra: dot, mul!
+using LinearAlgebra: Diagonal, dot, mul!
 using MultiFloats: Float64x2, Float64x4
 using SparseArrays: sparse
 using SummationByPartsOperators: MattssonNordström2004, SafeMode
@@ -55,6 +55,39 @@ source = MattssonNordström2004()
     @test Matrix(ops_wrap.D) ≈ Matrix(ops.D)
     report_wrap = validate_staggered(ops_wrap; max_monomial_degree = 4, verbose = false)
     @test report_wrap.sbp.sbp_no_origin <= 1.0e-10
+end
+
+@testset "Naive staggered operator API" begin
+    ops = Staggered.spherical_operators(
+        source;
+        accuracy_order = 4,
+        N = 32,
+        R = 1.0,
+        p = 2,
+        method = :naive
+    )
+
+    @test ops.divergence_method === :naive
+    D_expected = Matrix(ops.Godd) + Diagonal(ops.p ./ ops.r)
+    @test Matrix(ops.D) ≈ D_expected atol = 1.0e-12 rtol = 1.0e-12
+
+    report = Staggered.validate(ops; max_monomial_degree = 4, verbose = false)
+    @test report.diagnostics.divergence_method === :naive
+    @test !report.diagnostics.sbp_expected
+
+    diag = Staggered.diagnose(ops, report; verbose = false)
+    @test !diag.interpretation.flags[:sbp_issue]
+
+    ops_wrap = staggered_spherical_operators(
+        source;
+        accuracy_order = 4,
+        N = 32,
+        R = 1.0,
+        p = 2,
+        method = :naive
+    )
+    @test ops_wrap.divergence_method === :naive
+    @test Matrix(ops_wrap.D) ≈ Matrix(ops.D)
 end
 
 @testset "Staggered wave evolution path" begin

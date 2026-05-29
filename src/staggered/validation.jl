@@ -235,6 +235,8 @@ function validate(
         r0 = ops.r[1],
         r0_ok = ops.r[1] > zero(T),
         has_origin_node = false,
+        divergence_method = ops.divergence_method,
+        sbp_expected = ops.divergence_method === :standard,
         closure_width = closure_right,
         closure_width_left = closure.closure_width_left,
         closure_width_right = closure_right,
@@ -260,7 +262,7 @@ function validate(
     if verbose
         println("Staggered validation summary")
         println("  M_full = $(diagnostics.M), Nh = $(diagnostics.Nh), closure_left = $(diagnostics.closure_width_left), closure_right = $(diagnostics.closure_width_right), safe_count = $(diagnostics.safe_count)")
-        println("  r[1] = $(diagnostics.r0), has_origin_node = false")
+        println("  r[1] = $(diagnostics.r0), has_origin_node = false, method = $(diagnostics.divergence_method)")
         println("  sbp_full = $(sbp.sbp_full), sbp_no_origin = $(sbp.sbp_no_origin)")
     end
 

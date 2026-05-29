@@ -1,25 +1,39 @@
 using Printf: @printf, @sprintf
 
-using SphericalSBPOperators
+if !isdefined(@__MODULE__, :SphericalSBPOperators)
+    @eval using SphericalSBPOperators
+end
 using SummationByPartsOperators
 
 # Reuse source collection, high-precision Schur pipeline, metric extraction,
 # and generic table writer helpers.
 include(joinpath(@__DIR__, "generate_banded_spectrum_tables.jl"))
-# Load staggered operator construction API.
-include(joinpath(@__DIR__, "..", "src", "staggered", "Staggered.jl"))
 
 function _build_staggered_ops(source, order::Int;
                               points::Int,
-                              R::Rational{BigInt},
+                              R,
                               p::Int,
-                              mode)
-    return Staggered.spherical_operators(source;
-                                         accuracy_order = order,
-                                         N = points,
-                                         R = R,
-                                         p = p,
-                                         mode = mode)
+                              mode,
+                              method::Symbol)
+    return SphericalSBPOperators.staggered_spherical_operators(source;
+                                                               accuracy_order = order,
+                                                               N = points,
+                                                               R = R,
+                                                               p = p,
+                                                               method = method,
+                                                               mode = mode)
+end
+
+function _staggered_variant_tag(method::Symbol)
+    method in (:standard, :naive) ||
+        throw(ArgumentError("Unsupported staggered method `$method`. Use `:standard` or `:naive`."))
+    return method === :standard ? "staggered" : "staggered_naive"
+end
+
+function _staggered_variant_caption(method::Symbol)
+    method in (:standard, :naive) ||
+        throw(ArgumentError("Unsupported staggered method `$method`. Use `:standard` or `:naive`."))
+    return method === :standard ? "staggered" : "staggered, naive"
 end
 
 function _is_staggered_unsupported_source_error(err)
@@ -34,9 +48,10 @@ end
 
 function _compute_order_rows_staggered(order::Int;
                                        points::Int,
-                                       R::Rational{BigInt},
+                                       R,
                                        p::Int,
                                        mode,
+                                       method::Symbol,
                                        tiny_zero_tol::Float64)
     gathered = collect_sbp_sources()
     rows_hyper_ref = NamedTuple[]
@@ -53,7 +68,7 @@ function _compute_order_rows_staggered(order::Int;
         bib_key = get(_SOURCE_TO_BIB, label, nothing)
         try
             ops = _build_staggered_ops(src, order; points = points, R = R, p = p,
-                                       mode = mode)
+                                       mode = mode, method = method)
 
             L_ref = _assemble_hyperbolic_block(ops; bc = :reflecting)
             L_rad = _assemble_hyperbolic_block(ops; bc = :absorbing)
@@ -73,19 +88,20 @@ function _compute_order_rows_staggered(order::Int;
             push!(rows_laplacian,
                   (; label = label, short_name = short_name, bib_key = bib_key, metrics = metrics_lap))
             ok += 1
-            @printf("[staggered order=%d] [%d/%d] OK   %s\n", order, idx, total, label)
+            @printf("[staggered method=%s order=%d] [%d/%d] OK   %s\n", String(method), order,
+                    idx, total, label)
         catch err
             if _is_staggered_unsupported_source_error(err)
                 reason = sprint(showerror, err)
                 push!(skipped, (; type = string(typeof(src)), reason = reason))
-                @printf("[staggered order=%d] [%d/%d] SKIP %s :: %s\n", order, idx, total,
-                        label, reason)
+                @printf("[staggered method=%s order=%d] [%d/%d] SKIP %s :: %s\n",
+                        String(method), order, idx, total, label, reason)
                 continue
             end
             msg = sprint(showerror, err)
             push!(failures, (; label = label, error = msg))
-            @printf("[staggered order=%d] [%d/%d] FAIL %s :: %s\n", order, idx, total,
-                    label, msg)
+            @printf("[staggered method=%s order=%d] [%d/%d] FAIL %s :: %s\n", String(method),
+                    order, idx, total, label, msg)
         end
     end
 
@@ -105,22 +121,25 @@ function write_hyperbolic_tables_staggered(path::AbstractString, order_rows::Dic
                                            orders::Tuple{Vararg{Int}},
                                            points::Int,
                                            p::Int,
-                                           R::Rational{BigInt})
+                                           R,
+                                           method::Symbol)
     mkpath(dirname(path))
     rtxt = @sprintf("%.1f", Float64(R))
+    variant_tag = _staggered_variant_tag(method)
+    variant_caption = _staggered_variant_caption(method)
     open(path, "w") do io
         println(io, "\\begin{widetext}")
         for (k, order) in enumerate(orders)
             data = order_rows[order]
             _write_table(io,
                          data.hyper_reflective;
-                         caption = "Reflective first-order hyperbolic SAT operator spectral metrics (staggered) at order=$(order), N=$(points), p=$(p), R=$(rtxt) (successful sources only).",
-                         label = "tab:hyperbolic-reflective-staggered-order$(order)",)
+                         caption = "Reflective first-order hyperbolic SAT operator spectral metrics ($(variant_caption)) at order=$(order), N=$(points), p=$(p), R=$(rtxt) (successful sources only).",
+                         label = "tab:hyperbolic-reflective-$(variant_tag)-order$(order)",)
             println(io)
             _write_table(io,
                          data.hyper_radiative;
-                         caption = "Radiative first-order hyperbolic SAT operator spectral metrics (staggered) at order=$(order), N=$(points), p=$(p), R=$(rtxt) (successful sources only).",
-                         label = "tab:hyperbolic-radiative-staggered-order$(order)",)
+                         caption = "Radiative first-order hyperbolic SAT operator spectral metrics ($(variant_caption)) at order=$(order), N=$(points), p=$(p), R=$(rtxt) (successful sources only).",
+                         label = "tab:hyperbolic-radiative-$(variant_tag)-order$(order)",)
             if k != length(orders)
                 println(io)
                 println(io)
@@ -137,17 +156,20 @@ function write_laplacian_divg_tables_staggered(path::AbstractString,
                                                orders::Tuple{Vararg{Int}},
                                                points::Int,
                                                p::Int,
-                                               R::Rational{BigInt})
+                                               R,
+                                               method::Symbol)
     mkpath(dirname(path))
     rtxt = @sprintf("%.1f", Float64(R))
+    variant_tag = _staggered_variant_tag(method)
+    variant_caption = _staggered_variant_caption(method)
     open(path, "w") do io
         println(io, "\\begin{widetext}")
         for (k, order) in enumerate(orders)
             data = order_rows[order]
             _write_table(io,
                          data.laplacian;
-                         caption = "Staggered Laplacian operator \$L=\\mathrm{Div}\\,G\$ spectral metrics at order=$(order), N=$(points), p=$(p), R=$(rtxt) (successful sources only).",
-                         label = "tab:laplacian-divg-staggered-order$(order)",)
+                         caption = "Staggered Laplacian operator \$L=\\mathrm{Div}\\,G\$ spectral metrics ($(variant_caption)) at order=$(order), N=$(points), p=$(p), R=$(rtxt) (successful sources only).",
+                         label = "tab:laplacian-divg-$(variant_tag)-order$(order)",)
             if k != length(orders)
                 println(io)
                 println(io)
@@ -163,45 +185,57 @@ function generate_staggered_tables(;
                                    orders::Tuple{Vararg{Int}} = (4, 6),
                                    points::Int = 31,
                                    p::Int = 2,
-                                   R::Rational{BigInt} = big(30) // big(1),
+                                   R = big(30) // big(1),
                                    tiny_zero_tol::Float64 = 1e-16,
+                                   method::Symbol = :standard,
                                    mode = SafeMode(),
-                                   out_hyper::AbstractString = joinpath("tables",
-                                                                        "hyperbolic_sat_spectrum_tables_staggered.tex"),
-                                   out_lap::AbstractString = joinpath("tables",
-                                                                      "laplacian_divg_spectrum_tables_staggered.tex"),
+                                   out_hyper::Union{Nothing, AbstractString} = nothing,
+                                   out_lap::Union{Nothing, AbstractString} = nothing,
                                    export_tables_dir::Union{Nothing, AbstractString} = _DEFAULT_EXPORT_TABLES_DIR)
+    Rq = _as_big_rational(R)
+    variant_tag = _staggered_variant_tag(method)
+    out_hyper_resolved = isnothing(out_hyper) ?
+                         joinpath("tables",
+                                  "hyperbolic_sat_spectrum_tables_$(variant_tag).tex") :
+                         String(out_hyper)
+    out_lap_resolved = isnothing(out_lap) ?
+                       joinpath("tables",
+                                "laplacian_divg_spectrum_tables_$(variant_tag).tex") :
+                       String(out_lap)
     results_by_order = Dict{Int, Any}()
     for order in orders
-        println("\n=== Computing staggered order ", order, " ===")
+        println("\n=== Computing $(variant_tag) order ", order, " ===")
         results_by_order[order] = _compute_order_rows_staggered(order;
                                                                 points = points,
-                                                                R = R,
+                                                                R = Rq,
                                                                 p = p,
                                                                 mode = mode,
+                                                                method = method,
                                                                 tiny_zero_tol = tiny_zero_tol)
         data = results_by_order[order]
-        @printf("staggered order=%d summary: %d/%d succeeded, %d failed, %d skipped constructors\n",
-                order, data.success_count, data.total_count, length(data.failures),
+        @printf("%s order=%d summary: %d/%d succeeded, %d failed, %d skipped constructors\n",
+                variant_tag, order, data.success_count, data.total_count, length(data.failures),
                 length(data.skipped))
     end
 
-    write_hyperbolic_tables_staggered(out_hyper,
+    write_hyperbolic_tables_staggered(out_hyper_resolved,
                                       results_by_order;
                                       orders = orders,
                                       points = points,
                                       p = p,
-                                      R = R)
-    write_laplacian_divg_tables_staggered(out_lap,
+                                      R = Rq,
+                                      method = method)
+    write_laplacian_divg_tables_staggered(out_lap_resolved,
                                           results_by_order;
                                           orders = orders,
                                           points = points,
                                           p = p,
-                                          R = R)
-    _export_tables_to_dir([String(out_hyper), String(out_lap)], export_tables_dir)
+                                          R = Rq,
+                                          method = method)
+    _export_tables_to_dir([out_hyper_resolved, out_lap_resolved], export_tables_dir)
 
-    println("\nWrote: ", out_hyper)
-    println("Wrote: ", out_lap)
+    println("\nWrote: ", out_hyper_resolved)
+    println("Wrote: ", out_lap_resolved)
     return results_by_order
 end
 

@@ -93,11 +93,14 @@ end
 
 function _align_reference_to_grid(target_r::AbstractVector,
                                   ref_r::AbstractVector,
-                                  ref_u::AbstractVector)
+                                  ref_u::AbstractVector;
+                                  method::Symbol = :exact)
     length(ref_r) == length(ref_u) ||
         throw(DimensionMismatch("`ref_r` and `ref_u` must have the same length."))
     isempty(target_r) && throw(ArgumentError("`target_r` must be non-empty."))
     isempty(ref_r) && throw(ArgumentError("`ref_r` must be non-empty."))
+    method in (:exact, :interpolate) ||
+        throw(ArgumentError("`method` must be :exact or :interpolate, got `$(method)`."))
     if collect(target_r) == collect(ref_r)
         return collect(ref_u)
     end
@@ -118,6 +121,15 @@ function _align_reference_to_grid(target_r::AbstractVector,
         idx = searchsortedfirst(ref_r, ri)
         if idx <= length(ref_r) && ref_r[idx] == ri
             aligned[i] = T(ref_u[idx])
+        elseif method === :interpolate
+            1 < idx <= length(ref_r) ||
+                throw(ArgumentError("Cannot interpolate target node r=$(ri) from the reference grid interval [$first_ref, $last_ref]."))
+            left_r = T(ref_r[idx - 1])
+            right_r = T(ref_r[idx])
+            left_u = T(ref_u[idx - 1])
+            right_u = T(ref_u[idx])
+            θ = (T(ri) - left_r) / (right_r - left_r)
+            aligned[i] = (one(T) - θ) * left_u + θ * right_u
         else
             left = idx > 1 ? ref_r[idx - 1] : missing
             right = idx <= length(ref_r) ? ref_r[idx] : missing

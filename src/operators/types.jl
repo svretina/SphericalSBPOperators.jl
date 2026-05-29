@@ -68,6 +68,7 @@ struct StaggeredSphericalOperators{T <: Real, Ti <: Integer} <: AbstractSpherica
     Geven::SparseMatrixCSC{T, Ti}
     Godd::SparseMatrixCSC{T, Ti}
     D::SparseMatrixCSC{T, Ti}
+    divergence_method::Symbol
     closure_width::Int
     accuracy_order::Int
     p::Int

@@ -50,3 +50,12 @@ this looks fishy.
 - [ ] Move wave solver into separate package, e.g. SSBPWaveSolver.jl
 - [ ] Move plots into separate package, e.g. SSBPWavePlots.jl
 - [ ] Move spectrum plots into separate package, e.g. SSBPOperatorSpectrum.jl
+
+
+
+
+
+ runs = run_non_diagonal(
+           accuracy_order=6,
+           experimental=true,
+           outer_boundary_closure_help=false, R=40.0, N=40, T_final=25.0, dt=0.5, initial_data_kind=:regular_left_moving_spherical_gaussian, target_eltype=Float64, boundary_condition=:dirichlet, alg_name=:dp8)
