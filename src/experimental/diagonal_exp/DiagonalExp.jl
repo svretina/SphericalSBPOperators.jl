@@ -5,7 +5,7 @@ using SummationByPartsOperators: SafeMode
 using ..SphericalSBPOperators:
                                DiagonalMassSphericalOperators,
                                scale_spherical_operators as _base_scale_spherical_operators,
-                               spherical_operators as _base_spherical_operators,
+                               diagonal_spherical_operators as _base_spherical_operators,
                                apply_divergence,
                                apply_even_gradient,
                                apply_odd_derivative,

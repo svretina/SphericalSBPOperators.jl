@@ -1233,7 +1233,7 @@ Notes:
 - `mass_solver`, `mass_solver_opts`, `seed_banded`, and `seed_band_scale` are kept
   for API compatibility and are currently ignored in diagonal-mass mode.
 """
-function spherical_operators(source;
+function diagonal_spherical_operators(source;
                              accuracy_order,
                              N,
                              R,

@@ -1,215 +1,198 @@
-# SphericalSBPOperators
+# SphericalSBPOperators.jl
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20400455.svg)](https://doi.org/10.5281/zenodo.20400455)
+High-order, energy-stable summation-by-parts (SBP) finite-difference operators
+for radial problems with an (r^{-p}) coordinate singularity. The package
+constructs collocated operators with a node at the origin and staggered
+operators that straddle it.
 
+It is intended for first-order hyperbolic systems, wave propagation, and other
+problems requiring compatible radial gradient and divergence operators.
 
-`SphericalSBPOperators.jl` builds spherical-symmetry SBP operators on `[0, R]` by
-folding Cartesian SBP operators from a mirrored grid `[-R, R]`.
+## Features
 
-**THIS REPO IS UNDER CONSTRUCTION AND HAS NO DOCUMENTATION**
-BREAKING CHANGES WILL OCCUR WITHOUT WARNING IN THE NEAR FUTURE. 
-arXiv preprint will be added in the next month. 
-repo will get sanitized in the next months.
-
-```
-@software{vretinaris2026,
-  author    = {Stamatis Vretinaris},
-  title     = {SphericalSBPOperators.jl},
-  month     = {May},
-  year      = {2026},
-  publisher = {Zenodo},
-  version   = {v0.1.0-alpha},
-  doi       = {10.5281/zenodo.20400455},
-  url       = {https://doi.org/10.5281/zenodo.20400455}
-}
-```
-
-## Theory summary
-
-At the origin, parity is a symmetry constraint, not a boundary condition:
-- scalar-like fields `ϕ` are even (`ϕ(-r) = ϕ(r)`);
-- radial flux-like fields `u` are odd (`u(-r) = -u(r)`, so `u(0)=0`).
-
-The operators enforce:
-- `Geven`: even -> odd derivative;
-- `D`: odd -> even spherical divergence.
-
-For metric power `p` (`p=2` spherical, `p=1` cylindrical):
-```math
-\mathrm{Div}_p(u)=\frac{1}{r^p}\frac{d}{dr}\left(r^p u\right).
-```
-
-The metric-weighted mass uses:
-```math
-H = H_{\mathrm{cart,half}}\,\mathrm{diag}(r^p), \quad
-H_{\mathrm{cart,half}} = \frac12 E_{\mathrm{even}}^T H_{\mathrm{full}} E_{\mathrm{even}}.
-```
-
-The discrete SBP identity is:
-```math
-H D + G^T H = B, \quad B=\mathrm{diag}(0,\dots,0,R^p).
-```
-
-`B[end,end]=R^p` because only the outer boundary contributes; `r=0` is not a boundary.
-
-For `p>0`, `H[1,1]=0`, so SBP does not determine the origin row of `D`.
-The implementation fixes that row with the removable-singularity limit:
-```math
-D[1,:] = (p+1)\,G_{\mathrm{odd}}[1,:].
-```
+- Collocated non-diagonal-norm SBP operators of accuracy order 4 and 6.
+- Staggered SBP comparison operators of accuracy order 4 and 6.
+- Exact rational construction for published SBP4/SBP6 coefficients.
+- A single public constructor, `spherical_operators`.
+- Sparse matrices, stable operator container types, and type-stable operator
+  application for a fixed numeric input type.
+- Support for general integer metric powers `p`; `p=2` is spherical symmetry
+  and `p=1` is cylindrical symmetry.
 
 ## Installation
 
 ```julia
 using Pkg
-Pkg.activate("path/to/SphericalSBPOperators.jl")
-Pkg.instantiate()
+Pkg.add(url = "https://github.com/<organisation>/SphericalSBPOperators.jl")
 ```
 
-## Usage
+The package builds on
+[SummationByPartsOperators.jl](https://github.com/ranocha/SummationByPartsOperators.jl);
+choose a Cartesian SBP source from that package.
+
+## Quick start
 
 ```julia
 using SphericalSBPOperators
 using SummationByPartsOperators: MattssonNordström2004
 
 source = MattssonNordström2004()
-ops = diagonal_spherical_operators(source;
-    accuracy_order = 4,
+
+# Collocated paper SBP6 on r ∈ [0, 1]. N is the number of subintervals.
+ops = spherical_operators(source;
+    accuracy_order = 6,
     N = 64,
     R = 1.0,
     p = 2,
+    grid = :collocated,
 )
 
-report = validate(ops; verbose = true)
-diag = diagnose(ops, report; Ktest = 8, verbose = true)
+u = ops.r .^ 3                 # an odd radial flux
+div_u = apply_divergence(ops, u)
+exact = 5 .* ops.r .^ 2        # (∂r + 2/r) r³
 ```
 
-## Experimental diagonal path
-
-`diagonal_exp_spherical_operators(...)` builds the same diagonal-mass family, but
-widens the exact coupled near-origin repair by two additional rows. On that enlarged
-block it enforces the same:
-
-- even-monomial gradient constraints used for `Geven`,
-- odd-monomial divergence constraints used through the SBP relation for `D`.
-
-Because `D` depends on `G_even^T`, the experimental path also searches over the
-extra repaired-row stencil columns and picks an exact coupled solve that reduces the
-first downstream odd-monomial divergence residuals, instead of always using the
-nearest contiguous stencil.
-
-Use it the same way as the standard constructor:
+`ops` contains the grid `r`, scalar and vector mass matrices, the boundary
+matrix, and compatible gradient/divergence matrices. Prefer the stable generic
+accessors when writing downstream code:
 
 ```julia
-ops_exp = diagonal_exp_spherical_operators(source;
-    accuracy_order = 4,
-    N = 64,
-    R = 1.0,
-    p = 2,
-)
+scalar_mass(ops)     # S
+vector_mass(ops)     # V
+has_origin_node(ops) # true for collocated, false for staggered
 ```
 
-To inspect the experimental closure diagnostics, request the repair metadata:
+## Theory in brief
+
+For regularized radial variables, the divergence has the form
+
+```math
+\mathcal D_p u = \frac{1}{r^p}\partial_r(r^p u)
+                 = \partial_r u + \frac{p}{r}u.
+```
+
+The apparent singularity at `r = 0` is a coordinate effect. Regular scalar
+variables are even under reflection through the origin; radial-flux variables
+are odd. The package folds a Cartesian SBP operator on `[-R, R]` using these
+parities and constructs matrices satisfying the discrete integration-by-parts
+identity
+
+```math
+S D + G^T V = B, \qquad B = \operatorname{diag}(0,\ldots,0,R^p).
+```
+
+Here `G` is the even-to-odd gradient, `D` is the odd-to-even covariant
+divergence, and `S` and `V` are the scalar and vector mass matrices. Thus the
+semidiscrete energy changes only through the outer boundary. For the supported
+collocated operators, `S` is diagonal and `V` has a small symmetric
+off-diagonal closure near the origin; this permits high-order accuracy together
+with the SBP identity.
+
+See the [documentation site](docs/src/index.md) for the derivation, parity
+conventions, and the relation to the publication.
+
+## Inspecting the origin closure
+
+Use a deliberately small grid to inspect only the rows touched by the origin
+closure. This is useful for teaching, debugging, and reproducing paper tables;
+it is not a recommended production resolution.
 
 ```julia
-exp_build = diagonal_exp_spherical_operators(source;
-    accuracy_order = 4,
-    N = 64,
-    R = 1.0,
-    p = 2,
-    return_repair_info = true,
-)
+using LinearAlgebra: norm
 
-ops_exp = exp_build.ops
-repair_info = exp_build.repair_info
+small = spherical_operators(source;
+    accuracy_order = 4, N = 16, R = 16//1, p = 2, grid = :collocated)
+
+small.r[1:7]
+Matrix(small.Geven[1:7, 1:7])
+Matrix(small.D[1:7, 1:7])
+Matrix(vector_mass(small)[1:7, 1:7])
+
+# Exact rational arithmetic makes the SBP residual exactly zero.
+norm(Matrix(scalar_mass(small) * small.D + small.Geven' * vector_mass(small) - small.B))
 ```
 
-`repair_info` includes the repaired rows, affected divergence rows inferred from the
-chosen stencil columns, exact rank/consistency checks for the coupled closure system,
-and SBP moment-compatibility residuals for the imposed monomial pairs.
+The first grid point is exactly zero. `Geven` differentiates even scalar data,
+whereas `D` accepts odd flux data. Do not apply `D` to arbitrary values at the
+origin: an odd flux must satisfy `u[1] == 0` on a collocated grid.
 
-## Exact rational mode
-
-Numeric type is inferred from inputs similarly to `SummationByPartsOperators`.
-If `R` is rational, operators are built with rational arithmetic.
+## Collocated and staggered grids
 
 ```julia
-ops_exact = diagonal_spherical_operators(source;
-    accuracy_order = 4,
-    N = 16,
-    R = 1//1,
-    p = 2,
-)
+# Node at r = 0; N means subintervals and yields N + 1 nodes.
+collocated = spherical_operators(source;
+    accuracy_order = 4, N = 32, R = 1.0, p = 2, grid = :collocated)
+
+# No origin node; N means staggered half-grid nodes.
+staggered = spherical_operators(source;
+    accuracy_order = 4, N = 32, R = 1.0, p = 2, grid = :staggered)
 ```
 
-In rational mode, exact identities (such as `sbp_no_origin`) can be exactly zero.
+Choose `:collocated` when values at the origin are part of the state and its
+regularity is represented by parity. Choose `:staggered` when a grid that avoids
+the origin is more natural for the surrounding discretization. Both supported
+families satisfy their intended SBP relation; `method = :naive` in staggered
+mode is available only as a comparison construction and is not an SBP method.
 
-## Diagnostics
+## Numeric types and performance
 
-`diagnose(ops, report)` runs grid/folding/operator-consistency checks and localized
-polynomial error analysis, then returns a structured `NamedTuple` plus an interpreted
-conclusion list.
+The construction follows Julia’s numeric types:
 
-## Wave SAT boundary conditions
+```julia
+float_ops = spherical_operators(source;
+    accuracy_order = 4, N = 32, R = 1.0, p = 2)
 
-The radial first-order wave system uses:
-
-```math
-\partial_t \Pi = D\Xi,\qquad \partial_t \Xi = G_{\mathrm{even}}\Pi
+exact_ops = spherical_operators(source;
+    accuracy_order = 4, N = 32, R = 1//1, p = 2)
 ```
 
-with discrete energy
+`float_ops` stores `Float64` sparse matrices; `exact_ops` stores
+`Rational{BigInt}` coefficients and is appropriate for reproducibility checks,
+not large production runs. Operator containers encode their matrix element and
+index types. Matrix application is inference-stable for a fixed operator and
+input vector type:
 
-```math
-E = \tfrac12\left(\Pi^T H \Pi + \Xi^T H \Xi\right).
+```julia
+using Test
+x = ones(length(float_ops.r))
+@inferred apply_even_gradient(float_ops, x) # Vector{Float64}
 ```
 
-Using `H D + G^T H = B`, interior terms collapse to an outer-boundary flux:
+Construct operators once and reuse them. Exact coefficient construction is
+deliberately more expensive than floating-point construction.
 
-```math
-\frac{dE}{dt} = \Pi^T B \Xi = B_{NN}\,\Pi_N\Xi_N.
+## Scope and companion packages
+
+This package deliberately contains operator construction, scaling, and
+validation only. The following companion packages are staged for extraction and
+will be linked here when released:
+
+- `SphericalSBPWave.jl` — semidiscrete wave systems, boundary conditions, and
+  ODE integration.
+- `SphericalSBPPlots.jl` — Makie-based visualization and publication figures.
+- `SphericalSBPAnalysis.jl` — convergence, spectrum, and post-processing tools.
+
+Their current handoff source is in [companion-packages](companion-packages/README.md).
+Experimental operator prototypes remain in `src/experimental/` and are not part
+of the loaded package or public API.
+
+## Reproducibility and citation
+
+The construction parameters and exact coefficient path for the publication are
+recorded in [PAPER_OPERATOR_REPRODUCTION.md](PAPER_OPERATOR_REPRODUCTION.md).
+Please cite the associated publication and software record when using this
+package in research.
+
+## Documentation
+
+Build the local documentation site with:
+
+```julia
+using Pkg
+Pkg.activate("docs")
+Pkg.develop(path = ".")
+Pkg.instantiate()
+include("docs/make.jl")
 ```
 
-At `r=R`, characteristic variables are
-
-```math
-w_{\mathrm{in}} = \Pi + \Xi,\qquad w_{\mathrm{out}} = \Pi - \Xi.
-```
-
-SAT penalties are added only at node `N`:
-
-```math
-\dot\Pi_N \mathrel{+}= -\sigma_\Pi H_{NN}^{-1}\rho,\qquad
-\dot\Xi_N \mathrel{+}= -\sigma_\Xi H_{NN}^{-1}\rho.
-```
-
-- `bc=:absorbing`: `\rho=w_{\mathrm{in}}`, `\sigma_\Pi=B_{NN}/2`, `\sigma_\Xi=B_{NN}/2` (dissipative).
-- `bc=:reflecting`: `\rho=w_{\mathrm{in}}-w_{\mathrm{out}}=2\Xi` (equivalent to `\Xi(R)=0`), `\sigma_\Pi=B_{NN}/2`, `\sigma_\Xi=0` (energy-conserving).
-
-Origin symmetry is enforced separately:
-- state constraint: `\Xi(0)=0`,
-- RHS constraint: `\dot\Xi(0)=0`.
-
-This is required because for `p>0`, `H[1,1]=0`, so the origin DOF is invisible to the energy norm unless parity is explicitly enforced.
-
-## Initial Data Notes
-
-Coupling is immediate in the first-order system:
-
-```math
-\Xi_t = G_{\mathrm{even}}\Pi.
-```
-
-So even when `\Xi_0 = 0`, any spatial variation in `\Pi_0` gives nonzero `\Xi_t(0)`,
-and `\Xi` appears right away. This is expected and not itself an energy bug.
-
-`solve_wave_ode` supports:
-- `initial_data_mode=:auto`: default behavior (`\Xi_0 = G\phi_0` if `\Xi_0` is omitted),
-- `initial_data_mode=:potential`: require `\phi_0` and build `\Xi_0 = G\phi_0`,
-- characteristic profiles via `w_in0`, `w_out0` with
-  `\Pi_0 = (w_{\mathrm{in},0}+w_{\mathrm{out},0})/2`,
-  `\Xi_0 = (w_{\mathrm{in},0}-w_{\mathrm{out},0})/2`.
-
-Use `check_potential_consistency(ops, \Pi, \Xi)` to reconstruct a best-fit `\hat\phi`
-from `\Xi \approx G\hat\phi`, report residuals, and report `max|G\Pi|` as the expected
-instantaneous source of `\Xi` growth.
+The generated HTML entry point is `docs/build/index.html`.

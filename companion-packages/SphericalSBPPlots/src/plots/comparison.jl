@@ -197,43 +197,12 @@ function _try_family_construction(builder::Function, label::AbstractString, colo
     end
 end
 
-"""
-    plot_divergence_comparison(; power, h, p=2, accuracy_order=4, npoints=30, plot_points=5, profile=:monomial, source=MattssonNordström2004(), mode=SafeMode())
-
-Compare the diagonal, mixed-order diagonal, staggered, and non-diagonal divergence
-operators on either the odd monomial `u(r) = r^power` or the analytic profile
-`u(r) = r e^{-r^2}`.
-
-The comparison constructs operators with `npoints` grid points in each family, then
-plots only the first `plot_points` near-origin samples by default. The supplied
-spacing `h` therefore determines the corresponding domain size in each constructor.
-"""
-function plot_divergence_comparison(;
-                                    power::Int,
-                                    h::Real,
-                                    p::Int = 2,
-                                    accuracy_order::Int = 4,
-                                    npoints::Int = 30,
-                                    plot_points::Union{Nothing, Int} = 5,
-                                    profile::Symbol = :monomial,
-                                    source = MattssonNordström2004(),
-                                    mode = SafeMode(),
-                                    display_figure::Bool = true,
-                                    save_figure::Bool = true,
-                                    out_dir::AbstractString = DIVERGENCE_COMPARISON_DIR,
-                                    filename::Union{Nothing, AbstractString} = nothing)
-    if profile === :monomial
-        isodd(power) ||
-            throw(ArgumentError("`power` must be odd for `profile = :monomial`."))
-        power >= 1 ||
-            throw(ArgumentError("`power` must be positive for `profile = :monomial`."))
-    elseif profile !== :analytic
-        throw(ArgumentError("Unsupported comparison profile `$profile`. Use `:monomial` or `:analytic`."))
-    end
-    h > 0 || throw(ArgumentError("`h` must be positive."))
-    # For staggered operators the folded grid uses half-offset points
-    # `h/2, 3h/2, ..., (2npoints-1)h/2`, so `npoints` points with spacing `h`
-    # means `R = (npoints - 0.5)h`.
+function _comparison_family_specs(; source,
+                                  accuracy_order::Int,
+                                  h::Real,
+                                  p::Int,
+                                  npoints::Int,
+                                  mode)
     R_staggered = (npoints - 0.5) * Float64(h)
     non_diagonal_builder = accuracy_order == 6 ?
                            (() -> non_diagonal_exp_spherical_operators(source;
@@ -249,17 +218,83 @@ function plot_divergence_comparison(;
                                                                    p = p,
                                                                    mode = mode))
 
-    attempted_families = (_try_family_construction("Staggered", :darkorange3) do
-                              staggered_spherical_operators(source;
-                                                            accuracy_order = accuracy_order,
-                                                            N = npoints,
-                                                            R = R_staggered,
-                                                            p = p,
-                                                            mode = mode)
-                          end,
-                          _try_family_construction("Non-diagonal", :seagreen4) do
-                              non_diagonal_builder()
-                          end)
+    return Dict(
+        :staggered => (label = "Staggered",
+                       color = :darkorange3,
+                       build = () -> staggered_spherical_operators(source;
+                                                                   accuracy_order = accuracy_order,
+                                                                   N = npoints,
+                                                                   R = R_staggered,
+                                                                   p = p,
+                                                                   mode = mode)),
+        :staggered_naive => (label = "Naive staggered",
+                             color = :goldenrod4,
+                             build = () -> staggered_spherical_operators(source;
+                                                                         accuracy_order = accuracy_order,
+                                                                         N = npoints,
+                                                                         R = R_staggered,
+                                                                         p = p,
+                                                                         mode = mode,
+                                                                         method = :naive)),
+        :non_diagonal => (label = "Non-diagonal",
+                          color = :seagreen4,
+                          build = non_diagonal_builder),
+    )
+end
+
+"""
+    plot_divergence_comparison(; power, h, p=2, accuracy_order=4, npoints=30, plot_points=5, profile=:monomial, families=(:staggered, :staggered_naive, :non_diagonal), source=MattssonNordström2004(), mode=SafeMode())
+
+Compare selected divergence operators on either the odd monomial
+`u(r) = r^power` or the analytic profile `u(r) = r e^{-r^2}`.
+
+Supported `families` are `:staggered`, `:staggered_naive`, and `:non_diagonal`.
+The comparison constructs operators with `npoints` grid points in each selected
+family, then plots only the first `plot_points` near-origin samples by default.
+The supplied spacing `h` therefore determines the corresponding domain size in
+each constructor.
+"""
+function plot_divergence_comparison(;
+                                    power::Int,
+                                    h::Real,
+                                    p::Int = 2,
+                                    accuracy_order::Int = 4,
+                                    npoints::Int = 30,
+                                    plot_points::Union{Nothing, Int} = 5,
+                                    profile::Symbol = :monomial,
+                                    families::Tuple{Vararg{Symbol}} = (:staggered,
+                                                                       :staggered_naive,
+                                                                       :non_diagonal),
+                                    source = MattssonNordström2004(),
+                                    mode = SafeMode(),
+                                    display_figure::Bool = true,
+                                    save_figure::Bool = true,
+                                    out_dir::AbstractString = DIVERGENCE_COMPARISON_DIR,
+                                    filename::Union{Nothing, AbstractString} = nothing)
+    if profile === :monomial
+        isodd(power) ||
+            throw(ArgumentError("`power` must be odd for `profile = :monomial`."))
+        power >= 1 ||
+            throw(ArgumentError("`power` must be positive for `profile = :monomial`."))
+    elseif profile !== :analytic
+        throw(ArgumentError("Unsupported comparison profile `$profile`. Use `:monomial` or `:analytic`."))
+    end
+    h > 0 || throw(ArgumentError("`h` must be positive."))
+    isempty(families) && throw(ArgumentError("`families` must not be empty."))
+    specs = _comparison_family_specs(; source = source,
+                                     accuracy_order = accuracy_order,
+                                     h = h,
+                                     p = p,
+                                     npoints = npoints,
+                                     mode = mode)
+    invalid_families = filter(family -> !haskey(specs, family), families)
+    isempty(invalid_families) ||
+        throw(ArgumentError("Unsupported `families`: $(collect(invalid_families)). Use any of (:staggered, :staggered_naive, :non_diagonal)."))
+
+    attempted_families = map(families) do family
+        spec = specs[family]
+        _try_family_construction(spec.build, spec.label, spec.color)
+    end
 
     families = collect(filter(family -> !family.skipped, attempted_families))
     isempty(families) &&

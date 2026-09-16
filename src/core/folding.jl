@@ -1,3 +1,4 @@
+"""Verify that half-grid `r` is nonempty and begins at the origin."""
 function _assert_origin(r::Vector{T}, atol::T) where {T <: Real}
     isempty(r) &&
         throw(ArgumentError("Half-grid is empty; could not locate nonnegative nodes."))
@@ -11,6 +12,7 @@ function _assert_origin(r::Vector{T}, atol::T) where {T <: Real}
     return nothing
 end
 
+"""Build an approximate mirror-pair lookup for a floating-point half-grid."""
 function _build_half_lookup(r::Vector{T}, atol::T) where {T <: AbstractFloat}
     scale = max(_maxabs(r), one(T))
     pair_tol = max(atol, T(64) * eps(T) * scale)
@@ -21,10 +23,12 @@ function _build_half_lookup(r::Vector{T}, atol::T) where {T <: AbstractFloat}
     return (key_to_index = key_to_index, pair_tol = pair_tol)
 end
 
+"""Build an exact mirror-pair lookup for a non-floating half-grid."""
 function _build_half_lookup(r::Vector{T}, ::T) where {T <: Real}
     return Dict{T, Int}(rj => j for (j, rj) in enumerate(r))
 end
 
+"""Return the half-grid index paired with `absx`, or throw if no pair exists."""
 function _lookup_half_index(absx::T, lookup::NamedTuple,
                             r::Vector{T}) where {T <: AbstractFloat}
     key = round(Int, absx / lookup.pair_tol)
@@ -43,7 +47,16 @@ function _lookup_half_index(absx::T, lookup::Dict{T, Int}, ::Vector{T}) where {T
     throw(ArgumentError("Could not pair mirrored grid point |x| = $absx with any half-grid node."))
 end
 
-function _build_folding_operators(xfull::Vector{T}; atol::T) where {T <: Real}
+"""
+    _build_folding_operators(xfull; atol, require_origin=true)
+
+Build the positive-half restriction `Rop` and even/odd extension maps
+`Eeven`/`Eodd` for a mirror-symmetric Cartesian grid. The maps satisfy
+`Eeven*u == u(|x|)` and `Eodd*u == sign(x)u(|x|)`. Set `require_origin=false`
+for staggered grids.
+"""
+function _build_folding_operators(xfull::Vector{T}; atol::T,
+                                  require_origin::Bool = true) where {T <: Real}
     M = length(xfull)
     half_indices = sort([i for i in eachindex(xfull) if xfull[i] >= -atol];
                         by = i -> xfull[i])
@@ -51,7 +64,7 @@ function _build_folding_operators(xfull::Vector{T}; atol::T) where {T <: Real}
         throw(ArgumentError("No half-grid nodes found with x >= -atol."))
 
     r = xfull[half_indices]
-    _assert_origin(r, atol)
+    require_origin && _assert_origin(r, atol)
 
     Nh = length(r)
     rowR = collect(1:Nh)

@@ -194,6 +194,7 @@ function spherical_operators(source;
                                         exact_solve = exact_solve,
                                         verbose = verbose)
     elseif accuracy_order == 6
+        # The publication SBP6 closure has the left-only vector-mass pattern.
         sbp6_solve_accuracy_constraints(source;
                                         accuracy_order = accuracy_order,
                                         points = points_int,
@@ -204,6 +205,7 @@ function spherical_operators(source;
                                         atol = atol,
                                         exact_solve = exact_solve,
                                         verbose = verbose,
+                                        outer_boundary_closure_help = false,
                                         kwargs...)
     else
         throw(ArgumentError("Non-diagonal unified mode currently supports only `accuracy_order ∈ {4,6}`; got $accuracy_order. Use the specialized SBP8 constructor directly if needed."))
@@ -225,10 +227,10 @@ end
                                  target_eltype=nothing, exact_solve=true, verbose=false,
                                  kwargs...)
 
-Construct spherical operators for the experimental non-diagonal SBP6 closure with the
-same folded-grid API as `spherical_operators`, but using the `sbp6_exp` split-mass
-solve. As in the standard diagonal path, construction is performed on a canonical
-grid with `Δr = 1` and the final operator set is scaled afterward.
+Legacy compatibility wrapper for the publication non-diagonal SBP6 closure. Prefer
+`non_diagonal_spherical_operators(...; accuracy_order=6)`, which uses the same
+paper closure. Construction is performed on a canonical grid with `Δr = 1` and
+the final operator set is scaled afterward.
 """
 function sbp6_exp_spherical_operators(source;
                                       N::Union{Nothing, Integer} = nothing,
@@ -248,17 +250,17 @@ function sbp6_exp_spherical_operators(source;
     R_use, h_use = _resolve_non_diagonal_grid(points_int, R, h)
     R_canonical = _non_diagonal_canonical_radius(points_int)
 
-    solved = sbp6_exp_solve_accuracy_constraints(source;
-                                                 accuracy_order = 6,
-                                                 points = points_int,
-                                                 h = 1,
-                                                 R = R_canonical,
-                                                 p = p,
-                                                 mode = mode,
-                                                 atol = atol,
-                                                 exact_solve = exact_solve,
-                                                 verbose = verbose,
-                                                 kwargs...)
+    solved = sbp6_solve_accuracy_constraints(source;
+                                             accuracy_order = 6,
+                                             points = points_int,
+                                             h = 1,
+                                             R = R_canonical,
+                                             p = p,
+                                             mode = mode,
+                                             atol = atol,
+                                             exact_solve = exact_solve,
+                                             verbose = verbose,
+                                             kwargs...)
 
     ops_canonical = _build_non_diagonal_ops(source, solved)
     Tout = isnothing(target_eltype) ? _default_scale_eltype(R_use) : target_eltype

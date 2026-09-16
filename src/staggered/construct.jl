@@ -225,13 +225,16 @@ function spherical_operators(
         accuracy_order = Int(accuracy_order),
         N = Nint,
         R = R_canonical,
-        mode = mode
+        mode = mode,
+        include_origin = false
     )
 
     T = eltype(xfull)
     atol_construct = _resolve_atol(T, nothing)
 
-    r, Rop, Eeven, Eodd = _build_folding_operators_staggered(xfull; atol = atol_construct)
+    r, Rop, Eeven, Eodd = _build_folding_operators(xfull;
+                                                     atol = atol_construct,
+                                                     require_origin = false)
     Nh = length(r)
 
     Geven = sparse(Rop * Gfull * Eeven)

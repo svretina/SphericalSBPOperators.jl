@@ -81,59 +81,15 @@ struct StaggeredSphericalOperators{T <: Real, Ti <: Integer} <: AbstractSpherica
     Nh::Int
 end
 
-function Base.getproperty(ops::DiagonalMassSphericalOperators, name::Symbol)
-    if name === :H
-        return getfield(ops, :S)
-    end
-    return getfield(ops, name)
-end
+"""Return the scalar-field SBP mass matrix for an operator set."""
+scalar_mass(ops::DiagonalMassSphericalOperators) = ops.S
+scalar_mass(ops::NonDiagonalMassSphericalOperators) = ops.S
+scalar_mass(ops::StaggeredSphericalOperators) = ops.H
 
-function Base.propertynames(::DiagonalMassSphericalOperators, private::Bool = false)
-    base = (:r,
-            :S,
-            :V,
-            :B,
-            :Geven,
-            :Godd,
-            :D,
-            :closure_width,
-            :accuracy_order,
-            :p,
-            :R,
-            :source,
-            :mode,
-            :atol,
-            :snap_factor,
-            :M_full,
-            :Nh)
-    return private ? base : (base..., :H)
-end
+"""Return the radial-flux SBP mass matrix for an operator set."""
+vector_mass(ops::DiagonalMassSphericalOperators) = ops.V
+vector_mass(ops::NonDiagonalMassSphericalOperators) = ops.V
+vector_mass(ops::StaggeredSphericalOperators) = ops.H
 
-function Base.getproperty(ops::NonDiagonalMassSphericalOperators, name::Symbol)
-    if name === :G
-        return getfield(ops, :Geven)
-    end
-    return getfield(ops, name)
-end
-
-function Base.propertynames(::NonDiagonalMassSphericalOperators, private::Bool = false)
-    base = (:r,
-            :H,
-            :S,
-            :V,
-            :B,
-            :Geven,
-            :Godd,
-            :D,
-            :closure_width,
-            :accuracy_order,
-            :p,
-            :R,
-            :source,
-            :mode,
-            :atol,
-            :snap_factor,
-            :M_full,
-            :Nh)
-    return private ? base : (base..., :G)
-end
+"""Whether the half grid includes the origin."""
+has_origin_node(ops::AbstractSphericalOperators) = first(ops.r) == zero(eltype(ops.r))

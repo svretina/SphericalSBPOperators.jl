@@ -1,4 +1,45 @@
-@inline diagonal_spherical_operators(args...; kwargs...) = spherical_operators(args...; kwargs...)
+"""
+    spherical_operators(source; accuracy_order, N, R, p=2, grid=:collocated, kwargs...)
+
+Construct a spherical SBP operator set on `[0, R]` from a
+`SummationByPartsOperators` source.
+
+`grid` selects the publication-supported discretization:
+
+- `:collocated` (default): the non-diagonal-mass SBP4/SBP6 operators with a
+  node at the origin;
+- `:staggered`: the staggered SBP operators used for the paper comparison.
+
+`accuracy_order`, `N`, and `R` are required. In collocated mode, `N` denotes
+subintervals, so the grid has `N + 1` nodes. In staggered mode, it is forwarded
+as the staggered half-grid node count. Extra keywords are forwarded to the
+selected constructor, e.g. `method=:naive` for the staggered comparison operator.
+"""
+function spherical_operators(source;
+                             accuracy_order::Integer,
+                             N::Integer,
+                             R,
+                             p::Integer = 2,
+                             grid::Symbol = :collocated,
+                             kwargs...)
+    if grid === :collocated
+        return non_diagonal_spherical_operators(source;
+                                                 accuracy_order = Int(accuracy_order),
+                                                 N = Int(N),
+                                                 R = R,
+                                                 p = Int(p),
+                                                 kwargs...)
+    elseif grid === :staggered
+        return staggered_spherical_operators(source;
+                                              accuracy_order = Int(accuracy_order),
+                                              N = Int(N),
+                                              R = R,
+                                              p = Int(p),
+                                              kwargs...)
+    end
+
+    throw(ArgumentError("`grid` must be :collocated or :staggered; got `$grid`."))
+end
 
 @inline staggered_spherical_operators(args...; kwargs...) = Staggered.spherical_operators(args...;
                                                                                           kwargs...)
@@ -12,15 +53,6 @@
 
 @inline non_diagonal_spherical_operators(args...; kwargs...) = NonDiagonalMass.spherical_operators(args...;
                                                                                                    kwargs...)
-
-@inline non_diagonal_exp_spherical_operators(args...; kwargs...) = NonDiagonalMass.sbp6_exp_spherical_operators(args...;
-                                                                                                                 kwargs...)
-
-@inline mixed_order_diagonal_spherical_operators(args...; kwargs...) = MixedOrderDiagonalMass.spherical_operators(args...;
-                                                                                                                  kwargs...)
-
-@inline diagonal_exp_spherical_operators(args...; kwargs...) = DiagonalExp.spherical_operators(args...;
-                                                                                                kwargs...)
 
 @inline apply_even_gradient(ops::Staggered.SphericalOperators, phi) = Staggered.apply_even_gradient(ops,
                                                                                                     phi)
