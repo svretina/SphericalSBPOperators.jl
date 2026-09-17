@@ -14,11 +14,6 @@ using ..SphericalSBPOperators:
                                sbp4_solve_accuracy_constraints,
                                sbp6_solve_accuracy_constraints
 
-export SphericalOperators
-export spherical_operators
-export sbp6_exp_spherical_operators
-export scale_spherical_operators
-
 const SphericalOperators = NonDiagonalMassSphericalOperators
 include("construct.jl")
 

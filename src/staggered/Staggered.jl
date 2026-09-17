@@ -14,14 +14,6 @@ using ..SphericalSBPOperators: StaggeredSphericalOperators,
                                _build_folding_operators,
                                _boundary_closure_width_from_operator
 
-export SphericalOperators
-export spherical_operators
-export scale_spherical_operators
-export validate
-export diagnose, interpret_diagnostics
-export apply_even_gradient, apply_odd_derivative, apply_divergence
-export enforce_odd!, check_odd
-
 const SphericalOperators = StaggeredSphericalOperators
 include("construct.jl")
 include("validation.jl")

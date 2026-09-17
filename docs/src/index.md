@@ -14,7 +14,13 @@ Depth = 2
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/<organisation>/SphericalSBPOperators.jl")
+Pkg.add(url = "https://github.com/svretina/SphericalSBPOperators.jl")
+```
+
+## Package module
+
+```@docs
+SphericalSBPOperators
 ```
 
 ## The public constructor
