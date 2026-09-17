@@ -1,5 +1,11 @@
 # SphericalSBPOperators.jl
 
+[![CI](https://github.com/svretina/SphericalSBPOperators.jl/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/svretina/SphericalSBPOperators.jl/actions/workflows/CI.yml)
+[![Documentation build](https://github.com/svretina/SphericalSBPOperators.jl/actions/workflows/docs.yml/badge.svg?branch=master)](https://github.com/svretina/SphericalSBPOperators.jl/actions/workflows/docs.yml)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://svretina.github.io/SphericalSBPOperators.jl/)
+[![Julia: 1.11+](https://img.shields.io/badge/Julia-1.11%2B-9558B2.svg?logo=julia)](https://julialang.org/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20400455.svg)](https://doi.org/10.5281/zenodo.20400455)
+
 High-order, energy-stable summation-by-parts (SBP) finite-difference operators
 for radial problems with an (r^{-p}) coordinate singularity. The package
 constructs collocated operators with a node at the origin and staggered
@@ -23,7 +29,7 @@ problems requiring compatible radial gradient and divergence operators.
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/<organisation>/SphericalSBPOperators.jl")
+Pkg.add(url = "https://github.com/svretina/SphericalSBPOperators.jl")
 ```
 
 The package builds on
