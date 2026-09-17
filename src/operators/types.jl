@@ -1,3 +1,10 @@
+"""
+    AbstractSphericalOperators
+
+Common supertype for supported spherical SBP operator sets. Concrete operator
+types provide a radial grid, compatible gradient/divergence matrices, boundary
+matrix, and the metadata needed to identify their discretization.
+"""
 abstract type AbstractSphericalOperators end
 
 """

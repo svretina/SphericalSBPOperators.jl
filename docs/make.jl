@@ -5,6 +5,7 @@ makedocs(
     modules = [SphericalSBPOperators],
     sitename = "SphericalSBPOperators.jl",
     format = Documenter.HTML(prettyurls = false),
+    checkdocs = :exports,
     pages = [
         "Home" => "index.md",
         "Theory" => "theory.md",

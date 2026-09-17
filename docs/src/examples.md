@@ -34,6 +34,9 @@ Use rational inputs and a small grid when inspecting coefficients. This mirrors
 the paper’s coefficient presentation while keeping the displayed blocks small.
 
 ```@example closure
+using SphericalSBPOperators
+using SummationByPartsOperators: MattssonNordström2004
+source = MattssonNordström2004()
 small = spherical_operators(source;
     accuracy_order = 4, N = 16, R = 16//1, p = 2, grid = :collocated)
 
@@ -60,6 +63,9 @@ norm(Matrix(residual))
 ## Construct SBP6 with publication coefficients
 
 ```@example sbp6
+using SphericalSBPOperators
+using SummationByPartsOperators: MattssonNordström2004
+source = MattssonNordström2004()
 paper_sbp6 = spherical_operators(source;
     accuracy_order = 6, N = 30, R = 30//1, p = 2, grid = :collocated)
 
@@ -72,6 +78,9 @@ See `PAPER_OPERATOR_REPRODUCTION.md` for the full reproducibility map.
 ## Staggered operators
 
 ```@example staggered
+using SphericalSBPOperators
+using SummationByPartsOperators: MattssonNordström2004
+source = MattssonNordström2004()
 staggered = spherical_operators(source;
     accuracy_order = 4, N = 32, R = 1.0, p = 2, grid = :staggered)
 
@@ -88,6 +97,9 @@ Use a floating radius for standard numerical work and a rational radius for
 exact coefficient inspection:
 
 ```@example types
+using SphericalSBPOperators
+using SummationByPartsOperators: MattssonNordström2004
+source = MattssonNordström2004()
 float_ops = spherical_operators(source;
     accuracy_order = 4, N = 20, R = 1.0, p = 2)
 exact_ops = spherical_operators(source;

@@ -37,17 +37,8 @@ The package’s stable surface is deliberately small: construct an operator set
 with `spherical_operators`, use the generic mass/origin accessors, and apply
 the compatible derivative operators. The low-level coefficient construction is
 kept internal so that downstream applications need not depend on a particular
-closure representation.
-
-```@docs
-spherical_operators
-scalar_mass
-vector_mass
-has_origin_node
-apply_even_gradient
-apply_odd_derivative
-apply_divergence
-```
+closure representation. See the [API reference](@ref) for function signatures
+and contracts.
 
 The publication reproduction parameters and exact rational-coefficient path
 are documented in the repository’s `PAPER_OPERATOR_REPRODUCTION.md`.
