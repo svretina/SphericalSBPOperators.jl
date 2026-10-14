@@ -1,9 +1,24 @@
-cff-version: 1.1.0
+cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
+title: SphericalSBPOperators.jl
 authors:
-- family-names: Vretinaris
-  given-names: Stamatis
-orcid: https://orcid.org/0000-0001-7575-813X
-title:svretina/SphericalSBPOperators.jl: v0.1.0-alpha
-version: v0.1.0-alpha
+  - family-names: Vretinaris
+    given-names: Stamatis
+    orcid: https://orcid.org/0000-0001-7575-813X
+version: 0.1.0
 date-released: 2026-05-26
+repository-code: https://github.com/svretina/SphericalSBPOperators.jl
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Vretinaris
+      given-names: Stamatis
+    - family-names: Schnetter
+      given-names: Erik
+  title: High-order summation-by-parts schemes for first-order hyperbolic systems in curvilinear coordinates with singularities
+  journal: Phys. Rev. D
+  year: 2026
+  month: 9
+  publisher: American Physical Society
+  doi: 10.1103/hg1v-qxsj
+  url: https://link.aps.org/doi/10.1103/hg1v-qxsj

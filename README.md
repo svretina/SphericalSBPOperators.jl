@@ -5,6 +5,7 @@
 [![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://svretina.github.io/SphericalSBPOperators.jl/)
 [![Julia: 1.11+](https://img.shields.io/badge/Julia-1.11%2B-9558B2.svg?logo=julia)](https://julialang.org/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20400455.svg)](https://doi.org/10.5281/zenodo.20400455)
+[![Cite](https://img.shields.io/badge/cite-10.1103%2Fhg1v--qxsj-blue.svg)](https://doi.org/10.1103/hg1v-qxsj)
 
 High-order, energy-stable summation-by-parts (SBP) finite-difference operators
 for radial problems with an (r^{-p}) coordinate singularity. The package
@@ -187,7 +188,23 @@ of the loaded package or public API.
 The construction parameters and exact coefficient path for the publication are
 recorded in [PAPER_OPERATOR_REPRODUCTION.md](PAPER_OPERATOR_REPRODUCTION.md).
 Please cite the associated publication and software record when using this
-package in research.
+package in research. GitHub can also generate a software citation from
+[CITATION.cff](CITATION.cff).
+
+### How to cite
+
+```bibtex
+@article{hg1v-qxsj,
+  title = {High-order summation-by-parts schemes for first-order hyperbolic systems in curvilinear coordinates with singularities},
+  author = {Vretinaris, Stamatis and Schnetter, Erik},
+  journal = {Phys. Rev. D},
+  year = {2026},
+  month = {Sep},
+  publisher = {American Physical Society},
+  doi = {10.1103/hg1v-qxsj},
+  url = {https://link.aps.org/doi/10.1103/hg1v-qxsj}
+}
+```
 
 ## Documentation
 

@@ -383,7 +383,7 @@ Solve the exact rational linear system for SBP4 split masses using:
 - `D = S^{-1}(B - G^T V)`
 - `(D*r - (p+1))[1:n-4] = 0`,
 - `(D*r^3 - (p+3)r^2)[1:5] = 0`,
-- `ones' * S * ones = R^3/3`,
+- `ones' * S * ones = R^(p+1)/(p+1)`,
 - unknowns only in the boundary block: `s[1:5]` and `V[1:5,1:5]`,
 - for `i > 5`, set `s[i] = (Hcart_half * r^p)[i]` (for spherical `p=2`, this is
   `Hcart_half * r^2` as requested), and enforce `V[i,i] = s[i]`.
@@ -529,12 +529,13 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
     add_degree_constraints!(1, rows.rows_r, :divergence)
     add_degree_constraints!(3, rows.rows_r3, :divergence)
 
-    # ones' * S * ones = R^3 / 3
+    # ones' * S * ones = R^(p + 1) / (p + 1)
     row_q0 = zeros(Tq, n_unknowns)
     @inbounds for i in 1:n_s_free
         row_q0[idx_s(i)] = 1 // 1
     end
-    rhs_q0 = (Rq^3 / 3) - sum(s_fixed[i] for i in (n_s_free + 1):N)
+    quadrature_target = Rq^(p + 1) / (p + 1)
+    rhs_q0 = quadrature_target - sum(s_fixed[i] for i in (n_s_free + 1):N)
     push_eq!(row_q0, rhs_q0, :quadrature, 0, 0)
 
     m = length(A_rows)
@@ -566,7 +567,7 @@ function sbp4_solve_accuracy_constraints(setup::NamedTuple;
 
     err_r = _sbp4_constraint_error(D, rq, p, 1, rows.rows_r)
     err_r3 = _sbp4_constraint_error(D, rq, p, 3, rows.rows_r3)
-    quad0_target = Rq^3 / 3
+    quad0_target = quadrature_target
     quad0_val = sum(sdiag)
     quad0_err = Float64(abs(quad0_val - quad0_target))
     tail_fix_err = n_s_free < N ?
