@@ -11,6 +11,7 @@ using ..SphericalSBPOperators:
                                _resolve_atol,
                                _scale_sparse_matrix,
                                _uniform_spacing,
+                               sbp2_solve_accuracy_constraints,
                                sbp4_solve_accuracy_constraints,
                                sbp6_solve_accuracy_constraints
 

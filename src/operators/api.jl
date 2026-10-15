@@ -6,8 +6,8 @@ Construct a spherical SBP operator set on `[0, R]` from a
 
 `grid` selects the publication-supported discretization:
 
-- `:collocated` (default): the non-diagonal-mass SBP4/SBP6 operators with a
-  node at the origin;
+- `:collocated` (default): the SBP2/SBP4/SBP6 operators with a node at the
+  origin (SBP2 uses a common diagonal scalar/vector norm);
 - `:staggered`: the staggered SBP operators used for the paper comparison.
 
 `accuracy_order`, `N`, and `R` are required. In collocated mode, `N` denotes

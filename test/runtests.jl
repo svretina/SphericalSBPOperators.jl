@@ -8,6 +8,12 @@ const SOURCE = MattssonNordström2004()
 include("core.jl")
 
 @testset "public spherical operator API" begin
+    diagonal_sbp2 = spherical_operators(SOURCE; accuracy_order = 2, N = 20,
+                                        R = 20, p = 2, mode = SafeMode())
+    @test diagonal_sbp2 isa NonDiagonalMassSphericalOperators
+    @test diagonal_sbp2.S == diagonal_sbp2.V
+    @test eltype(diagonal_sbp2.S) === Rational{BigInt}
+
     collocated = spherical_operators(SOURCE; accuracy_order = 4, N = 20,
                                      R = 20, p = 2, mode = SafeMode())
     @test collocated isa NonDiagonalMassSphericalOperators
@@ -31,6 +37,46 @@ include("core.jl")
     @test size(staggered.D) == (20, 20)
     @test_throws ArgumentError spherical_operators(SOURCE; accuracy_order = 4,
                                                    N = 20, R = 20, grid = :invalid)
+end
+
+@testset "collocated SBP2 diagonal-norm operators" begin
+    R = 20 // 1
+    ops = spherical_operators(SOURCE; accuracy_order = 2, N = 20, R, p = 2,
+                              mode = SafeMode())
+    r = ops.r
+
+    # The exact rational closure has a common diagonal norm and satisfies SBP.
+    @test ops.S == ops.V
+    @test nnz(ops.S) == length(r) == nnz(ops.V)
+    @test ops.S * ops.D + ops.Geven' * ops.V == ops.B
+    @test sum(ops.S) == R^3 / 3
+    @test ops.D * r == 3 .* ones(eltype(r), length(r))
+    @test ops.D[1, :] == 3 .* ops.Godd[1, :]
+
+    solved = SphericalSBPOperators.sbp2_solve_accuracy_constraints(
+        SOURCE; points = 21, N = 20, R, p = 2, mode = SafeMode(), verbose = false)
+    @test eltype(solved.A) === Rational{BigInt}
+    @test solved.residual == 0 // 1
+    @test solved.spd.common_diagonal_norm
+
+    # The expected second-order interior convergence is retained by the
+    # diagonal closure.
+    gradient_errors = Float64[]
+    divergence_errors = Float64[]
+    for N in (20, 40, 80)
+        refined = spherical_operators(SOURCE; accuracy_order = 2, N, R = 1.0,
+                                      p = 2, mode = SafeMode())
+        r = refined.r
+        interior = 5:(length(r) - 4)
+        push!(gradient_errors,
+              maximum(abs.(refined.Geven * cos.(r) .+ sin.(r))[interior]))
+        flux = r .* exp.(-r .^ 2)
+        exact_divergence = (3 .- 2 .* r .^ 2) .* exp.(-r .^ 2)
+        push!(divergence_errors,
+              maximum(abs.(refined.D * flux .- exact_divergence)[interior]))
+    end
+    @test all(gradient_errors[1:(end - 1)] ./ gradient_errors[2:end] .> 3)
+    @test all(divergence_errors[1:(end - 1)] ./ divergence_errors[2:end] .> 3)
 end
 
 @testset "collocated SBP4 cylindrical operators" begin

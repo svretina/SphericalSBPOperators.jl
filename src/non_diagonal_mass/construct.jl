@@ -148,8 +148,9 @@ end
                         p=2, mode=SafeMode(), atol=nothing, return_canonical=false,
                         target_eltype=nothing, exact_solve=true, verbose=false, kwargs...)
 
-Construct non-diagonal-mass folded spherical operators using the existing order-specific
-SBP4/SBP6 split-mass solvers.
+Construct folded spherical operators using the exact order-specific SBP2/SBP4/SBP6
+closure solvers. The second-order path has a common diagonal scalar/vector norm;
+the higher-order paths use split masses.
 
 Implementation details:
 - construction is performed on a canonical grid with `Δr = 1`;
@@ -182,7 +183,19 @@ function spherical_operators(source;
     R_use, h_use = _resolve_non_diagonal_grid(points_int, R, h)
     R_canonical = _non_diagonal_canonical_radius(points_int)
 
-    solved = if accuracy_order == 4
+    solved = if accuracy_order == 2
+        sbp2_solve_accuracy_constraints(source;
+                                        accuracy_order = accuracy_order,
+                                        points = points_int,
+                                        h = 1,
+                                        R = R_canonical,
+                                        p = p,
+                                        mode = mode,
+                                        atol = atol,
+                                        exact_solve = exact_solve,
+                                        verbose = verbose,
+                                        kwargs...)
+    elseif accuracy_order == 4
         sbp4_solve_accuracy_constraints(source;
                                         accuracy_order = accuracy_order,
                                         points = points_int,
@@ -208,7 +221,7 @@ function spherical_operators(source;
                                         outer_boundary_closure_help = false,
                                         kwargs...)
     else
-        throw(ArgumentError("Non-diagonal unified mode currently supports only `accuracy_order ∈ {4,6}`; got $accuracy_order. Use the specialized SBP8 constructor directly if needed."))
+        throw(ArgumentError("Non-diagonal unified mode currently supports only `accuracy_order ∈ {2,4,6}`; got $accuracy_order. Use the specialized SBP8 constructor directly if needed."))
     end
 
     ops_canonical = _build_non_diagonal_ops(source, solved)

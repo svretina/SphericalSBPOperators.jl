@@ -17,14 +17,19 @@ problems requiring compatible radial gradient and divergence operators.
 
 ## Features
 
-- Collocated non-diagonal-norm SBP operators of accuracy order 4 and 6.
+- Collocated SBP operators of accuracy order 2, 4, and 6:
+  - SBP2 has an exact common diagonal scalar/vector norm (`S = V`);
+  - SBP4 and SBP6 use a diagonal scalar norm and a structured symmetric
+    split vector norm near the origin.
 - Staggered SBP comparison operators of accuracy order 4 and 6.
-- Exact rational construction for published SBP4/SBP6 coefficients.
+- Exact rational construction for the SBP2 closure and published SBP4/SBP6
+  coefficients.
 - A single public constructor, `spherical_operators`.
 - Sparse matrices, stable operator container types, and type-stable operator
   application for a fixed numeric input type.
-- Support for general integer metric powers `p`; `p=2` is spherical symmetry
-  and `p=1` is cylindrical symmetry.
+- Support for every non-negative integer metric power `p ≥ 0`: `p=0` is the
+  Cartesian limit, `p=1` is cylindrical symmetry, and `p=2` is spherical
+  symmetry.
 
 ## Installation
 
@@ -90,10 +95,24 @@ S D + G^T V = B, \qquad B = \operatorname{diag}(0,\ldots,0,R^p).
 
 Here `G` is the even-to-odd gradient, `D` is the odd-to-even covariant
 divergence, and `S` and `V` are the scalar and vector mass matrices. Thus the
-semidiscrete energy changes only through the outer boundary. For the supported
-collocated operators, `S` is diagonal and `V` has a small symmetric
-off-diagonal closure near the origin; this permits high-order accuracy together
-with the SBP identity.
+semidiscrete energy changes only through the outer boundary. In the collocated
+family, SBP2 has a common positive diagonal norm (`S = V`), while SBP4/SBP6
+have diagonal `S` and a small symmetric off-diagonal closure in `V` near the
+origin; each construction satisfies the SBP identity exactly for rational
+inputs.
+
+## Supported orders and metric powers
+
+Use `accuracy_order = 2`, `4`, or `6` with `grid = :collocated`. The
+second-order path is useful when a fully diagonal pair of norms is required;
+the fourth- and sixth-order paths provide higher accuracy with their structured
+split vector norms. The staggered comparison family supports orders `4` and
+`6`.
+
+All public constructors accept non-negative integer `p`. The radial divergence
+is `∂r u + p*u/r`, interpreted at the origin through the odd-flux regularity
+condition. In particular, use `p=0` for the Cartesian limit, `p=1` for
+cylindrical symmetry, and `p=2` for spherical symmetry.
 
 See the [documentation site](docs/src/index.md) for the derivation, parity
 conventions, and the relation to the publication.
